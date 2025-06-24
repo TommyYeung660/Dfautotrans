@@ -1,0 +1,1 @@
+"""Test suite for Dead Frontier Auto Trading System.""" 
