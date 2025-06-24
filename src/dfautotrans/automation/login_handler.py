@@ -10,6 +10,8 @@ from ..config.settings import Settings
 from ..core.page_navigator import PageNavigator
 from ..automation.browser_manager import BrowserManager
 from ..automation.anti_detection import AntiDetectionManager
+from ..automation.cookie_manager import CookieManager
+from ..data.database import DatabaseManager
 
 
 class LoginError(Exception):
@@ -20,11 +22,13 @@ class LoginError(Exception):
 class LoginHandler:
     """Handles Dead Frontier login operations."""
     
-    def __init__(self, browser_manager: BrowserManager, page_navigator: PageNavigator, settings: Settings):
+    def __init__(self, browser_manager: BrowserManager, page_navigator: PageNavigator, settings: Settings, database_manager: Optional[DatabaseManager] = None):
         self.browser_manager = browser_manager
         self.page_navigator = page_navigator
         self.settings = settings
+        self.database_manager = database_manager
         self.anti_detection = AntiDetectionManager(settings.anti_detection)
+        self.cookie_manager = CookieManager(settings, database_manager)
         
         # Login state tracking
         self._login_attempts = 0
@@ -72,6 +76,69 @@ class LoginHandler:
             logger.error(f"Error checking login status: {e}")
             return False
     
+    async def smart_login(self) -> bool:
+        """Smart login that tries saved session first, then falls back to credential login."""
+        try:
+            logger.info("🔐 開始智能登錄流程...")
+            
+            # Step 1: Try to load saved session
+            logger.info("1️⃣ 嘗試加載保存的會話...")
+            session_info = await self.cookie_manager.get_session_info()
+            
+            if session_info:
+                logger.info(f"找到保存的會話: 用戶 {session_info.get('user_info', {}).get('username', 'Unknown')}")
+                logger.info(f"會話保存時間: {session_info.get('saved_at')}")
+                logger.info(f"會話過期時間: {session_info.get('expires_at')}")
+                
+                if session_info.get('is_valid', False):
+                    # Try to load the session
+                    if await self.cookie_manager.load_session(self.browser_manager.context):
+                        logger.info("2️⃣ 會話加載成功，驗證登錄狀態...")
+                        
+                        # Navigate to a protected page to test session
+                        await self.browser_manager.page.goto(
+                            "https://fairview.deadfrontier.com/onlinezombiemmo/index.php",
+                            wait_until="domcontentloaded"
+                        )
+                        
+                        # Wait for page to load and validate session
+                        await asyncio.sleep(3)
+                        
+                        if await self.cookie_manager.validate_session(self.browser_manager.page):
+                            logger.info("✅ 會話驗證成功，無需重新登錄！")
+                            self.browser_manager.is_logged_in = True
+                            self.page_navigator.clear_cache()
+                            return True
+                        else:
+                            logger.info("❌ 會話驗證失敗，清除過期會話")
+                            await self.cookie_manager.clear_session()
+                    else:
+                        logger.info("❌ 會話加載失敗")
+                else:
+                    logger.info("❌ 保存的會話已過期")
+                    await self.cookie_manager.clear_session()
+            else:
+                logger.info("沒有找到保存的會話")
+            
+            # Step 2: Fall back to credential login
+            logger.info("3️⃣ 執行傳統登錄流程...")
+            login_success = await self.perform_login()
+            
+            if login_success:
+                # Save session after successful login
+                logger.info("4️⃣ 登錄成功，保存會話...")
+                await self.cookie_manager.save_session(
+                    self.browser_manager.context,
+                    self.browser_manager.page
+                )
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ 智能登錄過程中發生錯誤: {e}")
+            return False
+    
     async def perform_login(self) -> bool:
         """執行登錄操作"""
         try:
@@ -104,6 +171,8 @@ class LoginHandler:
                 logger.info("✅ 登錄成功！")
                 # 同步狀態到 BrowserManager
                 self.browser_manager.is_logged_in = True
+                # 清除 PageNavigator 的登錄狀態緩存
+                self.page_navigator.clear_cache()
                 return True
             else:
                 logger.error("❌ 登錄失敗")

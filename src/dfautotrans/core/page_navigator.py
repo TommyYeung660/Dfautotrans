@@ -114,49 +114,136 @@ class PageNavigator:
             expected_indicators=[".storage", ".inventory", ".deposit"]
         )
     
-    async def check_login_status(self) -> bool:
-        """Check if user is currently logged in."""
+    async def check_login_status(self, force_refresh: bool = False) -> bool:
+        """Check if user is currently logged in.
+        
+        Args:
+            force_refresh: If True, bypass cache and perform fresh check
+        """
         if self.page is None:
             return False
         
-        # Use cache if available
-        if self._login_status_cache is not None:
+        # Use cache if available and not forcing refresh
+        if not force_refresh and self._login_status_cache is not None:
+            logger.debug(f"Using cached login status: {self._login_status_cache}")
             return self._login_status_cache
         
         try:
             # Check current URL
             current_url = self.page.url
+            logger.debug(f"Checking login status for URL: {current_url}")
             
-            # If we're on login page, we're not logged in
+            # If we're on login page, we're definitely not logged in
             if "autologin=1" in current_url or "login" in current_url.lower():
-                # Check if login form is visible
-                login_form = await self.page.query_selector("#login_form, .login-form, [name='username']")
+                # Double check by looking for login form
+                login_form = await self.page.query_selector("#login_form, .login-form, [name='username'], iframe[name*='fancybox-frame']")
                 if login_form:
+                    logger.debug("Found login form, user not logged in")
                     self._login_status_cache = False
                     return False
             
-            # If we're on fairview subdomain, we're likely logged in
+            # If we're on fairview subdomain, check for game content
             if "fairview.deadfrontier.com" in current_url:
-                # Additional check: look for user-specific elements
-                user_elements = await self.page.query_selector_all("script")
-                for element in user_elements:
-                    content = await element.inner_text()
-                    if "cash" in content.lower() or "username" in content.lower():
+                logger.debug("On fairview domain, checking for user-specific content")
+                
+                # Primary indicators (most reliable)
+                primary_indicators = [
+                    "a[href*='logout']",  # Logout link is strongest indicator
+                    "text=/Cash: \\$[\\d,]+/",  # Cash display
+                    "text=/Level \\d+/",  # Level display
+                ]
+                
+                for selector in primary_indicators:
+                    try:
+                        element = await self.page.wait_for_selector(selector, timeout=2000)
+                        if element:
+                            logger.debug(f"Found primary login indicator: {selector}")
+                            self._login_status_cache = True
+                            return True
+                    except:
+                        continue
+                
+                # Secondary indicators (less reliable but still good)
+                secondary_indicators = [
+                    "generic:has-text('Health')",
+                    "generic:has-text('Hunger')",
+                    "generic:has-text('Thirst')",
+                    ".character-info",
+                    ".player-stats"
+                ]
+                
+                for selector in secondary_indicators:
+                    try:
+                        element = await self.page.query_selector(selector)
+                        if element:
+                            logger.debug(f"Found secondary login indicator: {selector}")
+                            self._login_status_cache = True
+                            return True
+                    except:
+                        continue
+                
+                # Page content analysis (fallback)
+                try:
+                    page_content = await self.page.content()
+                    login_indicators = ["cash:", "level:", "health:", "hunger:", "thirst:", "logout"]
+                    
+                    found_indicators = [indicator for indicator in login_indicators if indicator in page_content.lower()]
+                    
+                    if found_indicators:
+                        logger.debug(f"Found login indicators in page content: {found_indicators}")
                         self._login_status_cache = True
                         return True
+                    
+                    # Check for login-related content that indicates NOT logged in
+                    login_page_indicators = ["log in", "create account", "username", "password"]
+                    found_login_page = [indicator for indicator in login_page_indicators if indicator in page_content.lower()]
+                    
+                    if found_login_page:
+                        logger.debug(f"Found login page indicators: {found_login_page}")
+                        self._login_status_cache = False
+                        return False
+                        
+                except Exception as e:
+                    logger.debug(f"Page content analysis failed: {e}")
                 
-                # If no user elements found but on fairview, assume logged in
-                self._login_status_cache = True
-                return True
+                # If on fairview domain but no clear indicators, try a navigation test
+                logger.debug("No clear indicators on fairview domain, performing navigation test...")
+                try:
+                    # Try to access a protected resource
+                    response = await self.page.goto(
+                        "https://fairview.deadfrontier.com/onlinezombiemmo/index.php?page=15",  # Bank page
+                        wait_until="domcontentloaded",
+                        timeout=5000
+                    )
+                    
+                    if response and response.ok:
+                        await asyncio.sleep(1)  # Brief wait for page to render
+                        
+                        # Check if we're still on fairview (not redirected to login)
+                        final_url = self.page.url
+                        if "fairview.deadfrontier.com" in final_url and "autologin" not in final_url:
+                            logger.debug("Navigation test successful - user appears to be logged in")
+                            self._login_status_cache = True
+                            return True
+                        
+                except Exception as e:
+                    logger.debug(f"Navigation test failed: {e}")
+                
+                # If we reach here on fairview domain, assume not logged in
+                logger.debug("On fairview domain but no login indicators found")
+                self._login_status_cache = False
+                return False
             
-            # Try to find logout link or user info
+            # Try to find logout link or user info on other pages
             logout_link = await self.page.query_selector("a[href*='logout'], .logout")
             user_info = await self.page.query_selector(".user-info, .character-info, .player-name")
             
             if logout_link or user_info:
+                logger.debug("Found logout link or user info on non-fairview page")
                 self._login_status_cache = True
                 return True
             
+            logger.debug("No login indicators found, assuming not logged in")
             self._login_status_cache = False
             return False
             

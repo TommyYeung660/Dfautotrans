@@ -246,6 +246,17 @@ class SellingSlotsStatus(BaseModel):
         return max(0, self.max_slots - self.current_listings)
 
 
+class BankOperationResult(BaseModel):
+    """Result of a bank operation."""
+    success: bool
+    operation_type: str  # withdraw, withdraw_all, deposit, deposit_all, ensure_funds
+    amount_processed: Optional[int] = None
+    balance_before: Optional[int] = None
+    balance_after: Optional[int] = None
+    error_message: Optional[str] = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 class PlayerResources(BaseModel):
     """Complete player resources status."""
     cash_on_hand: int
