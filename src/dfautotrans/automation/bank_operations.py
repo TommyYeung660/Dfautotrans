@@ -147,7 +147,7 @@ class BankOperations:
                 )
             
             # Clear and fill amount
-            await withdraw_input.clear()
+            await withdraw_input.fill("")  # Clear the input
             await withdraw_input.fill(str(amount))
             
             # Find and click withdraw button
@@ -262,7 +262,7 @@ class BankOperations:
                 
                 if withdraw_input:
                     # Clear and fill with bank balance
-                    await withdraw_input.clear()
+                    await withdraw_input.fill("")  # Clear the input
                     await withdraw_input.fill(str(bank_balance))
                     
                     # Find regular withdraw button
@@ -402,7 +402,7 @@ class BankOperations:
                 )
             
             # Clear and fill amount
-            await deposit_input.clear()
+            await deposit_input.fill("")  # Clear the input
             await deposit_input.fill(str(amount))
             
             # Multiple strategies to find deposit button

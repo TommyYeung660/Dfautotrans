@@ -229,6 +229,10 @@ class StorageStatus(BaseModel):
     @property
     def available_space(self) -> int:
         return max(0, self.max_capacity - self.current_count)
+    
+    @property
+    def utilization_rate(self) -> float:
+        return self.current_count / self.max_capacity if self.max_capacity > 0 else 0
 
 
 class SellingSlotsStatus(BaseModel):

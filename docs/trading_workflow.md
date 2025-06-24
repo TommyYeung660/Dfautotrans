@@ -84,6 +84,7 @@
 ### 空間管理
 - inventory空間不足時自動存入Storage
 - Storage + inventory + 貨架空間全滿時暫停系統
+- 如果inventory 完全沒有貨品(應該是全部上架), 而Storage 仍然有貨品, 就將所有Storage 的貨品取出(要取出貨品到marketplace 的selling上架)
 
 ### 市場更新機制
 - 正常情況：每分鐘檢查一次市場
