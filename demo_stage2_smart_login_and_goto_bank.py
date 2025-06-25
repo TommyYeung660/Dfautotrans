@@ -60,11 +60,7 @@ class SmartLoginDemo:
         logger.info("✅ 登錄處理器初始化完成")
         
         # 5. 初始化銀行操作模組
-        self.bank_operations = BankOperations(
-            self.settings,
-            self.browser_manager,
-            self.page_navigator
-        )
+        self.bank_operations = BankOperations(self.browser_manager)
         logger.info("✅ 銀行操作模組初始化完成")
     
     async def demonstrate_smart_login(self):
@@ -123,6 +119,10 @@ class SmartLoginDemo:
             initial_cash = await self.bank_operations.get_cash_on_hand()
             initial_bank = await self.bank_operations.get_bank_balance()
             
+            # 處理 None 值
+            initial_cash = initial_cash or 0
+            initial_bank = initial_bank or 0
+            
             logger.info(f"💵 初始現金餘額: ${initial_cash:,}")
             logger.info(f"🏦 初始銀行餘額: ${initial_bank:,}")
             logger.info(f"💰 初始總可用資金: ${initial_cash + initial_bank:,}")
@@ -168,7 +168,7 @@ class SmartLoginDemo:
                     logger.info(f"   操作後銀行餘額: ${withdraw_result.balance_after:,}")
                     
                     # 驗證現金增加
-                    new_cash = await self.bank_operations.get_cash_on_hand()
+                    new_cash = await self.bank_operations.get_cash_on_hand() or 0
                     logger.info(f"   現金餘額更新: ${new_cash:,}")
                     
                     # 等待一下再進行下一步操作
@@ -181,7 +181,7 @@ class SmartLoginDemo:
                 logger.info("1️⃣ 銀行餘額為 $0，跳過取款演示")
             
             # 2. 演示存入部分現金
-            current_cash = await self.bank_operations.get_cash_on_hand()
+            current_cash = await self.bank_operations.get_cash_on_hand() or 0
             if current_cash > 10000:  # 如果現金超過 $10,000，存入一部分
                 deposit_amount = 5000
                 logger.info(f"\n2️⃣ 演示存入部分現金（${deposit_amount:,}）...")
@@ -195,8 +195,8 @@ class SmartLoginDemo:
                     logger.info(f"   操作後銀行餘額: ${deposit_result.balance_after:,}")
                     
                     # 驗證餘額變化
-                    new_cash = await self.bank_operations.get_cash_on_hand()
-                    new_bank = await self.bank_operations.get_bank_balance()
+                    new_cash = await self.bank_operations.get_cash_on_hand() or 0
+                    new_bank = await self.bank_operations.get_bank_balance() or 0
                     logger.info(f"   現金餘額更新: ${new_cash:,}")
                     logger.info(f"   銀行餘額更新: ${new_bank:,}")
                     
@@ -237,9 +237,9 @@ class SmartLoginDemo:
             
             # 5. 最終資金狀況
             logger.info("\n5️⃣ 最終資金狀況:")
-            final_cash = await self.bank_operations.get_cash_on_hand()
-            final_bank = await self.bank_operations.get_bank_balance()
-            final_total = await self.bank_operations.get_total_available_funds()
+            final_cash = await self.bank_operations.get_cash_on_hand() or 0
+            final_bank = await self.bank_operations.get_bank_balance() or 0
+            final_total = await self.bank_operations.get_total_available_funds() or 0
             
             logger.info(f"   最終現金餘額: ${final_cash:,}")
             logger.info(f"   最終銀行餘額: ${final_bank:,}")

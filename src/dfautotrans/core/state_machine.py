@@ -154,6 +154,36 @@ class StateMachine:
         valid_targets = self.valid_transitions.get(self.current_state, [])
         return target_state in valid_targets
     
+    def set_state(self, target_state: TradingState) -> None:
+        """Set state directly (synchronous version for compatibility)."""
+        # Record state duration
+        state_duration = (datetime.utcnow() - self.state_entered_at).total_seconds()
+        
+        # Log transition
+        logger.info(f"State transition: {self.current_state} -> {target_state} (duration: {state_duration:.1f}s)")
+        
+        # Record state history
+        self.state_history.append({
+            'timestamp': datetime.utcnow().isoformat(),
+            'from_state': self.current_state.value,
+            'to_state': target_state.value,
+            'duration_seconds': state_duration,
+            'context': {},
+            'retry_count': self.retry_count
+        })
+        
+        # Update state
+        self.previous_state = self.current_state
+        self.current_state = target_state
+        self.state_entered_at = datetime.utcnow()
+        
+        # Reset retry count on successful transition (except for error states)
+        if target_state not in [TradingState.ERROR, TradingState.CRITICAL_ERROR]:
+            self.retry_count = 0
+        
+        # Clear wait condition
+        self.wait_until = None
+
     async def transition_to(self, target_state: TradingState, context: Optional[Dict[str, Any]] = None) -> bool:
         """Transition to a new state with validation."""
         if not self.can_transition_to(target_state):

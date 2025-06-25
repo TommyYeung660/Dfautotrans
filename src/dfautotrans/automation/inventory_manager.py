@@ -9,7 +9,7 @@ from loguru import logger
 from ..config.settings import Settings
 from ..automation.browser_manager import BrowserManager
 from ..core.page_navigator import PageNavigator
-from ..data.models import InventoryStatus, StorageStatus, SellingSlotsStatus
+from ..data.models import InventoryItemData, SellingSlotsStatus
 
 
 class InventoryItem:
@@ -49,8 +49,8 @@ class InventoryManager:
         self.page_navigator = page_navigator
         
         # Cache for inventory information
-        self._inventory_cache: Optional[InventoryStatus] = None
-        self._storage_cache: Optional[StorageStatus] = None
+        self._inventory_cache: Optional[Dict[str, Any]] = None
+        self._storage_cache: Optional[Dict[str, Any]] = None
         self._cache_timestamp: Optional[datetime] = None
         self._cache_duration = 30  # seconds
         
@@ -626,12 +626,12 @@ class InventoryManager:
         age = (datetime.now() - self._cache_timestamp).total_seconds()
         return age < self._cache_duration
     
-    def _update_inventory_cache(self, status: InventoryStatus) -> None:
+    def _update_inventory_cache(self, status: Dict[str, Any]) -> None:
         """Update inventory cache."""
         self._inventory_cache = status
         self._cache_timestamp = datetime.now()
-    
-    def _update_storage_cache(self, status: StorageStatus) -> None:
+
+    def _update_storage_cache(self, status: Dict[str, Any]) -> None:
         """Update storage cache."""
         self._storage_cache = status
         self._cache_timestamp = datetime.now()

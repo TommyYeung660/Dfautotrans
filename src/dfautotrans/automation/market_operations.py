@@ -58,12 +58,19 @@ class MarketOperations:
                 logger.error("❌ 無法導航到市場頁面")
                 return []
             
+            # Check and close any fancybox overlay that might be blocking the page
+            await self.browser_manager.close_fancybox_overlay()
+            
             # Ensure we're on the buying tab
             await self._ensure_buy_tab_active()
             
-            # Perform search if search term provided
+            # Perform search to load items (Dead Frontier requires keywords)
             if search_term:
                 await self._perform_search(search_term)
+            else:
+                # Use a common search term to load items (empty search doesn't work)
+                # Use a broad search term that matches many items
+                await self._perform_search("a")  # Single letter to match many items
             
             # Scan market items
             items = await self._scan_marketplace_table(max_items)
@@ -135,6 +142,9 @@ class MarketOperations:
                 if not await self.page_navigator.navigate_to_marketplace():
                     logger.error("❌ 無法導航到市場頁面")
                     return False
+            
+            # Check and close any fancybox overlay before purchase
+            await self.browser_manager.close_fancybox_overlay()
             
             # Ensure we're on the buying tab
             await self._ensure_buy_tab_active()
@@ -332,29 +342,68 @@ class MarketOperations:
     async def _perform_search(self, search_term: str) -> bool:
         """執行市場搜索。"""
         try:
+            # Check and close any fancybox overlay before search
+            await self.browser_manager.close_fancybox_overlay()
+            
             # Find search input field (from marketplace_helper.js: searchField)
             search_input = await self.page.query_selector("#searchField")
             if not search_input:
                 logger.warning("找不到搜索輸入框 #searchField")
                 return False
             
-            # Clear and enter search term
+            # Clear and enter search term (empty string for loading all items)
             await search_input.fill("")
-            await search_input.type(search_term)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.2)
+            
+            if search_term:  # Type the search term
+                await search_input.type(search_term)
+                await asyncio.sleep(0.5)
+                logger.debug(f"已輸入搜索詞: '{search_term}'")
+            else:
+                logger.warning("搜索詞為空，這可能不會返回結果")
+                await asyncio.sleep(0.3)
             
             # Find and click search button (from marketplace_helper.js: makeSearch)
             search_button = await self.page.query_selector("#makeSearch")
             if search_button:
-                logger.debug("點擊搜索按鈕...")
+                logger.debug("找到搜索按鈕")
+                
+                # Always enable search button first (required by Dead Frontier's JavaScript)
+                await self.page.evaluate("document.getElementById('makeSearch').disabled = false")
+                await asyncio.sleep(0.2)
+                
+                # Verify button is enabled
+                is_disabled = await search_button.is_disabled()
+                if is_disabled:
+                    logger.error("無法啟用搜索按鈕")
+                    return False
+                else:
+                    logger.debug("搜索按鈕已啟用，點擊...")
+                
+                # Click the search button
                 await search_button.click()
-                await asyncio.sleep(3)  # Wait for search results
+                logger.debug("搜索按鈕已點擊")
+                await asyncio.sleep(5)  # Wait longer for search results to load
+                
+                # Verify search was executed by checking for results
+                item_display = await self.page.query_selector("#itemDisplay")
+                if item_display:
+                    logger.debug("搜索完成，找到物品顯示區域")
+                else:
+                    logger.warning("搜索後沒有找到物品顯示區域")
+                    
             else:
+                logger.warning("找不到搜索按鈕 #makeSearch，嘗試按Enter鍵")
                 # Fallback to Enter key
                 await search_input.press("Enter")
                 await asyncio.sleep(3)
             
-            logger.debug(f"搜索完成: {search_term}")
+            logger.debug(f"搜索完成: {search_term if search_term else '(全部物品)'}")
+            
+            # Debug: Check if items loaded after search
+            fake_items_count = len(await self.page.query_selector_all(".fakeItem"))
+            logger.debug(f"搜索完成後找到 {fake_items_count} 個 .fakeItem 元素")
+            
             return True
             
         except Exception as e:
@@ -366,28 +415,40 @@ class MarketOperations:
         try:
             items = []
             
-            # Wait for table to load
-            await asyncio.sleep(2)
+            # Wait for items to load after search
+            await asyncio.sleep(3)
             
-            # Find marketplace table rows
-            table_selectors = [
-                ".fakeItem",
-                ".marketItem",
-                ".item-row",
-                "tr[class*='item']",
-                "tbody tr"
-            ]
+            # Check if itemDisplay container exists (from marketplace_helper.js)
+            item_display = await self.page.query_selector("#itemDisplay")
+            if not item_display:
+                logger.warning("找不到物品顯示容器 #itemDisplay")
+                return items
             
-            rows = []
-            for selector in table_selectors:
-                rows = await self.page.query_selector_all(selector)
-                if rows:
-                    logger.debug(f"找到 {len(rows)} 行使用選擇器: {selector}")
-                    break
+            # Find marketplace items using .fakeItem selector (from marketplace_helper.js)
+            rows = await self.page.query_selector_all(".fakeItem")
             
             if not rows:
-                logger.warning("找不到市場物品表格")
-                return items
+                logger.warning("找不到市場物品 (.fakeItem)")
+                # Try alternative selectors as fallback
+                alternative_selectors = [
+                    ".marketItem",
+                    ".item-row", 
+                    "tr[class*='item']",
+                    "#itemDisplay > div",
+                    "#itemDisplay tr"
+                ]
+                
+                for selector in alternative_selectors:
+                    rows = await self.page.query_selector_all(selector)
+                    if rows:
+                        logger.debug(f"使用備用選擇器找到 {len(rows)} 行: {selector}")
+                        break
+                
+                if not rows:
+                    logger.warning("使用所有選擇器都找不到市場物品")
+                    return items
+            else:
+                logger.debug(f"找到 {len(rows)} 個市場物品 (.fakeItem)")
             
             # Process each row
             processed_count = 0
@@ -650,43 +711,85 @@ class MarketOperations:
     async def _extract_selling_slots_info(self) -> Optional[Dict[str, Any]]:
         """提取銷售位信息。"""
         try:
-            # Look for selling slots information
-            slots_info_selectors = [
-                ".selling-slots-info",
-                ".marketplace-selling",
-                "#sellingInfo",
-                "text=/\\d+\\/\\d+.*slots?/i"
-            ]
+            # Wait for selling tab to load
+            await asyncio.sleep(2)
             
-            for selector in slots_info_selectors:
-                try:
-                    element = await self.page.wait_for_selector(selector, timeout=2000)
-                    if element:
-                        text = await element.inner_text()
-                        match = re.search(r'(\d+)/(\d+)', text)
-                        if match:
-                            used = int(match.group(1))
-                            max_slots = int(match.group(2))
-                            
-                            # Get list of currently listed items
-                            listed_items = await self._get_listed_items()
-                            
-                            return {
-                                'used': used,
-                                'max': max_slots,
-                                'items': listed_items
-                            }
-                except:
-                    continue
+            # First try to find the specific tradeSlotDisplay element
+            trade_slot_display = await self.page.query_selector(".tradeSlotDisplay")
+            used_slots = 0
+            max_slots = 30  # Default
             
-            # Fallback: count selling items directly
-            selling_items = await self.page.query_selector_all(".selling-item, .listed-item, .my-listing")
-            used_slots = len(selling_items)
+            if trade_slot_display:
+                text = await trade_slot_display.inner_text()
+                # Look for pattern like "2 / 26" or "6/30"
+                match = re.search(r'(\d+)\s*/\s*(\d+)', text)
+                if match:
+                    used_slots = int(match.group(1))
+                    max_slots = int(match.group(2))
+                    logger.debug(f"✅ 從 .tradeSlotDisplay 找到銷售位信息: {used_slots}/{max_slots}")
+                else:
+                    logger.debug(f"⚠️ .tradeSlotDisplay 文本格式不匹配: '{text}'")
+            else:
+                logger.debug("⚠️ 找不到 .tradeSlotDisplay 元素，嘗試其他選擇器...")
+                
+                # Fallback: try other selectors
+                slots_info_selectors = [
+                    "text=/\\d+\\/\\d+/",  # Look for X/Y pattern
+                    ".selling-slots-info",
+                    ".marketplace-selling", 
+                    "#sellingInfo",
+                    "td:has-text('/')",  # Table cell with slash
+                    "span:has-text('/')", # Span with slash
+                    "div:has-text('/')"   # Div with slash
+                ]
+                
+                for selector in slots_info_selectors:
+                    try:
+                        elements = await self.page.query_selector_all(selector)
+                        for element in elements:
+                            text = await element.inner_text()
+                            # Look for pattern like "6/30" or "0/30"
+                            match = re.search(r'(\d+)\s*/\s*(\d+)', text)
+                            if match:
+                                used_slots = int(match.group(1))
+                                max_slots = int(match.group(2))
+                                logger.debug(f"從備用選擇器找到銷售位信息: {used_slots}/{max_slots} (選擇器: {selector})")
+                                break
+                        if used_slots > 0 or max_slots != 30:  # Found valid info
+                            break
+                    except:
+                        continue
+            
+            # If no slots info found, try to count items directly
+            if used_slots == 0 and max_slots == 30:
+                # Look for selling items in various possible containers
+                selling_selectors = [
+                    ".fakeItem",  # Items in selling tab
+                    ".selling-item", 
+                    ".listed-item", 
+                    ".my-listing",
+                    "#itemDisplay .fakeItem",  # Items in item display area
+                    "tr[data-action]",  # Rows with data-action
+                    "tr:has(button)"  # Rows with buttons
+                ]
+                
+                for selector in selling_selectors:
+                    try:
+                        selling_items = await self.page.query_selector_all(selector)
+                        if selling_items:
+                            used_slots = len(selling_items)
+                            logger.debug(f"通過計數找到 {used_slots} 個銷售物品 (選擇器: {selector})")
+                            break
+                    except:
+                        continue
+            
+            # Get list of currently listed items
+            listed_items = await self._get_listed_items()
             
             return {
                 'used': used_slots,
-                'max': 30,  # Default max slots
-                'items': []
+                'max': max_slots,
+                'items': listed_items
             }
             
         except Exception as e:
@@ -698,14 +801,64 @@ class MarketOperations:
         try:
             items = []
             
-            # Find listed items
-            item_elements = await self.page.query_selector_all(".selling-item, .listed-item, .my-listing")
+            # Try multiple selectors to find listed items
+            item_selectors = [
+                ".fakeItem",  # Standard market items in selling tab
+                ".selling-item", 
+                ".listed-item", 
+                ".my-listing",
+                "#itemDisplay .fakeItem",  # Items in display area
+                "tr[data-type]"  # Rows with data-type attribute
+            ]
             
-            for element in item_elements:
-                item_name_element = await element.query_selector(".item-name, .name, td:first-child")
-                if item_name_element:
-                    item_name = await item_name_element.inner_text()
-                    items.append(item_name.strip())
+            for selector in item_selectors:
+                try:
+                    item_elements = await self.page.query_selector_all(selector)
+                    
+                    for element in item_elements:
+                        # Try different ways to extract item name
+                        item_name = None
+                        
+                        # Method 1: Look for .itemName class (from marketplace structure)
+                        item_name_element = await element.query_selector(".itemName")
+                        if item_name_element:
+                            item_name = await item_name_element.inner_text()
+                        
+                        # Method 2: Look for data-cash attribute
+                        if not item_name:
+                            item_name_element = await element.query_selector("[data-cash]")
+                            if item_name_element:
+                                item_name = await item_name_element.get_attribute("data-cash")
+                        
+                        # Method 3: Try common selectors
+                        if not item_name:
+                            name_selectors = [".item-name", ".name", "td:first-child", ".title"]
+                            for name_sel in name_selectors:
+                                item_name_element = await element.query_selector(name_sel)
+                                if item_name_element:
+                                    item_name = await item_name_element.inner_text()
+                                    break
+                        
+                        # Method 4: Use element text directly if it looks like an item name
+                        if not item_name:
+                            element_text = await element.inner_text()
+                            if element_text and len(element_text.strip()) > 0 and len(element_text.strip()) < 100:
+                                # Take first line as item name
+                                item_name = element_text.strip().split('\n')[0]
+                        
+                        if item_name and item_name.strip():
+                            clean_name = item_name.strip()
+                            if clean_name not in items and len(clean_name) > 1:
+                                items.append(clean_name)
+                                logger.debug(f"找到已上架物品: {clean_name}")
+                    
+                    if items:  # Found items with this selector, break
+                        logger.debug(f"使用選擇器 {selector} 找到 {len(items)} 個已上架物品")
+                        break
+                        
+                except Exception as selector_error:
+                    logger.debug(f"選擇器 {selector} 失敗: {selector_error}")
+                    continue
             
             return items
             
@@ -750,4 +903,5 @@ class MarketOperations:
     def _clear_cache(self) -> None:
         """清除緩存。"""
         self._market_cache = []
-        self._cache_timestamp = None 
+        self._cache_timestamp = None
+ 

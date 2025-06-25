@@ -65,7 +65,7 @@ class Stage2InventoryDemo:
             logger.info("✅ 登錄處理器初始化完成")
             
             # 5. 初始化銀行操作模組
-            self.bank_operations = BankOperations(self.settings, self.browser_manager, self.page_navigator)
+            self.bank_operations = BankOperations(self.browser_manager)
             logger.info("✅ 銀行操作模組初始化完成")
             
             # 6. 初始化庫存管理模組
