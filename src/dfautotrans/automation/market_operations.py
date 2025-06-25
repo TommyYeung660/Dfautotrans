@@ -25,12 +25,18 @@ class MarketOperations:
         self._cache_timestamp: Optional[datetime] = None
         self._cache_duration = 60  # seconds
         
-        # Search and buying configuration
+        # 載入交易配置
+        from ..config.trading_config import TradingConfigManager
+        self.config_manager = TradingConfigManager()
+        self.trading_config = self.config_manager.get_config()
+        
+        # 向後兼容的搜索配置
         self.search_config = {
-            'max_price_per_unit': 11.6,
-            'target_items': ['12.7mm Rifle Bullets', '12.7 Rifle Bullets'],
+            'max_price_per_unit': self.trading_config.buying.max_price_per_unit,
+            'target_items': self.trading_config.market_search.target_items,
             'max_rows_to_check': 20,
-            'auto_buy_enabled': False
+            'auto_buy_enabled': False,
+            'primary_search_terms': self.trading_config.market_search.primary_search_terms
         }
     
     @property
@@ -68,9 +74,11 @@ class MarketOperations:
             if search_term:
                 await self._perform_search(search_term)
             else:
-                # Use a common search term to load items (empty search doesn't work)
-                # Use a broad search term that matches many items
-                await self._perform_search("a")  # Single letter to match many items
+                # 使用配置中的主要搜索詞，而不是廣泛的 'a' 搜索
+                primary_terms = self.trading_config.market_search.primary_search_terms
+                search_term_to_use = primary_terms[0] if primary_terms else "12.7"
+                logger.info(f"🎯 沒有指定搜索詞，使用配置的主要目標搜索詞: '{search_term_to_use}'")
+                await self._perform_search(search_term_to_use)
             
             # Scan market items
             items = await self._scan_marketplace_table(max_items)
@@ -534,6 +542,9 @@ class MarketOperations:
     async def _find_and_click_buy_button(self, item: MarketItemData) -> bool:
         """找到指定物品並點擊購買按鈕。"""
         try:
+            # 首先關閉可能阻擋的信息框
+            await self._close_info_box()
+            
             # Find all market rows (.fakeItem from marketplace_helper.js)
             rows = await self.page.query_selector_all(".fakeItem")
             
@@ -545,7 +556,18 @@ class MarketOperations:
                     
                     if buy_button:
                         logger.debug(f"找到購買按鈕，準備點擊...")
-                        await buy_button.click()
+                        
+                        # 再次確保沒有阻擋元素
+                        await self._close_info_box()
+                        
+                        # 使用更安全的點擊方式
+                        try:
+                            await buy_button.click(force=True)
+                        except Exception as click_error:
+                            logger.debug(f"強制點擊失敗，嘗試JavaScript點擊: {click_error}")
+                            # 備用方案：使用JavaScript點擊
+                            await self.page.evaluate("(element) => element.click()", buy_button)
+                        
                         await asyncio.sleep(1)
                         return True
                     else:
@@ -558,6 +580,33 @@ class MarketOperations:
         except Exception as e:
             logger.error(f"查找並點擊購買按鈕時出錯: {e}")
             return False
+    
+    async def _close_info_box(self):
+        """關閉可能阻擋點擊的信息框"""
+        try:
+            # 嘗試隱藏 infoBox
+            info_box = await self.page.query_selector("#infoBox")
+            if info_box:
+                # 檢查是否可見
+                is_visible = await info_box.is_visible()
+                if is_visible:
+                    logger.debug("發現可見的infoBox，嘗試隱藏...")
+                    # 使用JavaScript強制隱藏
+                    await self.page.evaluate("document.getElementById('infoBox').style.visibility = 'hidden'")
+                    await asyncio.sleep(0.2)
+            
+            # 也檢查其他可能的阻擋元素
+            blocking_selectors = ["#textAddon", ".tooltip", ".popup"]
+            for selector in blocking_selectors:
+                element = await self.page.query_selector(selector)
+                if element:
+                    is_visible = await element.is_visible()
+                    if is_visible:
+                        await self.page.evaluate(f"document.querySelector('{selector}').style.display = 'none'")
+                        
+        except Exception as e:
+            logger.debug(f"關閉信息框時出錯: {e}")
+            # 不拋出異常，因為這只是輔助功能
     
     async def _is_matching_item_row(self, row, target_item: MarketItemData) -> bool:
         """檢查市場物品行是否匹配目標物品。"""

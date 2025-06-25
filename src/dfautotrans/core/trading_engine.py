@@ -8,11 +8,39 @@ import asyncio
 import logging
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
+from dataclasses import dataclass
 
 from ..data.models import (
-    TradingState, TradingCycle, TradingSession, TradingConfiguration,
+    TradingState, TradingCycle, TradingConfiguration,
     SystemResources, MarketCondition, PurchaseOpportunity, SellOrder
 )
+from ..config.trading_config import TradingConfig, TradingConfigManager
+
+@dataclass
+class TradingSessionData:
+    """交易會話數據 - 內存版本"""
+    session_id: str
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    current_state: TradingState = TradingState.IDLE
+    current_cycle: Optional[TradingCycle] = None
+    
+    # 統計數據
+    total_purchases: int = 0
+    total_sales: int = 0
+    total_profit: float = 0.0
+    successful_transactions: int = 0
+    failed_transactions: int = 0
+    
+    # 錯誤統計
+    login_failures: int = 0
+    network_errors: int = 0
+    business_errors: int = 0
+    
+    def __post_init__(self):
+        """初始化會話ID"""
+        if not self.session_id:
+            self.session_id = f"session_{self.start_time.strftime('%Y%m%d_%H%M%S')}"
 from ..automation.browser_manager import BrowserManager
 from ..automation.login_handler import LoginHandler
 from ..automation.market_operations import MarketOperations
@@ -30,16 +58,17 @@ logger = logging.getLogger(__name__)
 class TradingEngine:
     """Dead Frontier 自動交易引擎核心類"""
     
-    def __init__(self, config: TradingConfiguration, database_manager: DatabaseManager, settings=None):
+    def __init__(self, config: TradingConfiguration, database_manager: DatabaseManager, settings=None, trading_config_file: str = "trading_config.json"):
         """
         初始化交易引擎
         
         Args:
-            config: 交易配置參數
+            config: 交易配置參數（向後兼容）
             database_manager: 數據庫管理器
             settings: 系統設置（可選）
+            trading_config_file: 交易配置文件路徑
         """
-        self.config = config
+        self.legacy_config = config  # 保留舊配置以向後兼容
         self.database_manager = database_manager
         
         # 如果沒有提供settings，創建默認設置
@@ -47,6 +76,17 @@ class TradingEngine:
             from ..config.settings import Settings
             settings = Settings()
         self.settings = settings
+        
+        # 載入新的交易配置系統
+        self.config_manager = TradingConfigManager(trading_config_file)
+        self.trading_config = self.config_manager.load_config()
+        
+        # 驗證配置
+        config_errors = self.config_manager.validate_config()
+        if config_errors:
+            logger.warning(f"⚠️ 配置驗證發現問題: {config_errors}")
+        
+        logger.info(f"📋 交易配置已載入: {trading_config_file}")
         
         # 核心組件
         self.browser_manager = BrowserManager(settings)
@@ -60,11 +100,11 @@ class TradingEngine:
         self.bank_operations = BankOperations(self.browser_manager)
         
         # 策略模組
-        self.buying_strategy = BuyingStrategy(config)
-        self.selling_strategy = SellingStrategy(config)
+        self.buying_strategy = BuyingStrategy(config, self.trading_config)
+        self.selling_strategy = SellingStrategy(config, self.trading_config)
         
         # 狀態追蹤
-        self.current_session: Optional[TradingSession] = None
+        self.current_session: Optional[TradingSessionData] = None
         self.last_resources_check: Optional[datetime] = None
         self.last_market_scan: Optional[datetime] = None
         self.retry_count = 0
@@ -92,7 +132,7 @@ class TradingEngine:
             logger.info("🚀 啟動交易會話")
             
             # 創建新的交易會話
-            self.current_session = TradingSession(
+            self.current_session = TradingSessionData(
                 session_id="",
                 start_time=datetime.now(),
                 current_state=TradingState.INITIALIZING
@@ -100,6 +140,9 @@ class TradingEngine:
             
             # 初始化瀏覽器
             await self.browser_manager.initialize()
+            
+            # 初始化頁面導航器
+            await self.page_navigator.initialize()
             
             # 設置初始狀態
             self.state_machine.set_state(TradingState.INITIALIZING)
@@ -200,30 +243,50 @@ class TradingEngine:
             
             # 獲取當前現金
             current_cash = await self.page_navigator.get_current_cash()
+            current_cash = current_cash or 0  # 處理 None 值
             
             # 獲取銀行餘額
             bank_balance = await self.bank_operations.get_bank_balance()
+            bank_balance = bank_balance or 0  # 處理 None 值
             
             # 獲取庫存狀態
             inventory_status = await self.inventory_manager.get_inventory_status()
+            if not inventory_status:
+                logger.warning("⚠️ 無法獲取庫存狀態，使用默認值")
+                inventory_used, inventory_total = 0, 50
+            else:
+                inventory_used = inventory_status.get('used', 0) if isinstance(inventory_status, dict) else inventory_status.current_count
+                inventory_total = inventory_status.get('total', 50) if isinstance(inventory_status, dict) else inventory_status.max_capacity
             
             # 獲取倉庫狀態
             storage_status = await self.inventory_manager.get_storage_status()
+            if not storage_status:
+                logger.warning("⚠️ 無法獲取倉庫狀態，使用默認值")
+                storage_used, storage_total = 0, 1000
+            else:
+                storage_used = storage_status.get('used', 0) if isinstance(storage_status, dict) else storage_status.current_count
+                storage_total = storage_status.get('total', 1000) if isinstance(storage_status, dict) else storage_status.max_capacity
             
             # 獲取銷售位狀態
             selling_slots_status = await self.market_operations.get_selling_slots_status()
+            if not selling_slots_status:
+                logger.warning("⚠️ 無法獲取銷售位狀態，使用默認值")
+                selling_slots_used, selling_slots_total = 0, 30
+            else:
+                selling_slots_used = selling_slots_status.current_listings
+                selling_slots_total = selling_slots_status.max_slots
             
             # 創建資源狀況對象
             resources = SystemResources(
                 current_cash=current_cash,
                 bank_balance=bank_balance,
                 total_funds=current_cash + bank_balance,
-                inventory_used=inventory_status.current_count,
-                inventory_total=inventory_status.max_capacity,
-                storage_used=storage_status.current_count,
-                storage_total=storage_status.max_capacity,
-                selling_slots_used=selling_slots_status.current_listings,
-                selling_slots_total=selling_slots_status.max_slots
+                inventory_used=inventory_used,
+                inventory_total=inventory_total,
+                storage_used=storage_used,
+                storage_total=storage_total,
+                selling_slots_used=selling_slots_used,
+                selling_slots_total=selling_slots_total
             )
             
             logger.info(f"💰 資源檢查完成 - 總資金: ${resources.total_funds:,}, "
@@ -285,8 +348,16 @@ class TradingEngine:
             logger.info("📊 執行市場分析")
             self.state_machine.set_state(TradingState.MARKET_SCANNING)
             
-            # 掃描市場物品
-            market_items = await self.market_operations.scan_market_items()
+            # 使用配置中的目標搜索詞掃描市場物品
+            target_search_terms = self.trading_config.market_search.primary_search_terms
+            target_search_term = target_search_terms[0] if target_search_terms else "12.7"
+            max_items = self.trading_config.market_search.max_items_per_search
+            
+            logger.info(f"🎯 使用配置的目標搜索詞進行市場掃描: '{target_search_term}' (最多{max_items}個)")
+            market_items = await self.market_operations.scan_market_items(
+                search_term=target_search_term, 
+                max_items=max_items
+            )
             logger.info(f"🔍 掃描到 {len(market_items)} 個市場物品")
             
             # 使用購買策略評估物品
@@ -401,7 +472,7 @@ class TradingEngine:
                                f"價格: ${sell_order.selling_price}")
                     
                     success = await self.market_operations.list_item_for_sale(
-                        sell_order.item, sell_order.selling_price
+                        sell_order.item.item_name, sell_order.selling_price
                     )
                     
                     if success:
@@ -473,7 +544,7 @@ class TradingEngine:
                 self.current_session.current_state = TradingState.IDLE
             
             # 關閉瀏覽器
-            await self.browser_manager.close()
+            await self.browser_manager.cleanup()
             
             # 輸出會話統計
             self._log_session_summary()

@@ -72,18 +72,18 @@ async def test_market_operations():
             logger.warning("⚠️ 沒有掃描到市場物品")
         
         # 搜索特定物品
-        logger.info("🔍 搜索特定物品: '12.7 mm Rifle Bullets'...")
+        logger.info("🔍 搜索特定物品: '12.7mm Rifle Bullets'...")
         rifle_bullets = await market_operations.scan_market_items(
-            search_term="12.7 mm Rifle Bullets", 
+            search_term="12.7mm Rifle Bullets", 
             max_items=5
         )
         
         if rifle_bullets:
-            logger.info(f"✅ 找到 {len(rifle_bullets)} 個 12.7 mm Rifle Bullets")
+            logger.info(f"✅ 找到 {len(rifle_bullets)} 個 12.7mm Rifle Bullets")
             for i, item in enumerate(rifle_bullets, 1):
                 logger.info(f"   {i}. {item.item_name} - ${item.price} ({item.seller})")
         else:
-            logger.warning("⚠️ 沒有找到 12.7 mm Rifle Bullets")
+            logger.warning("⚠️ 沒有找到 12.7mm Rifle Bullets")
         
         logger.info("")
         

@@ -1,0 +1,77 @@
+{
+  "market_search": {
+    "target_items": [
+      "12.7mm Rifle Bullets",
+      "14mm Rifle Bullets",
+      "9mm Rifle Bullets",
+      "10 Gauge Shells",
+      "12 Gauge Shells",
+      "Energy Cell",
+      "Gasoline"
+    ],
+    "max_price_per_unit": [
+      11.0,
+      13.0,
+      11.0,
+      15.0,
+      16.0,
+      15.0,
+      3.0
+    ],
+    "max_items_per_search": 13,
+    "search_timeout_seconds": 15
+  },
+  "buying": {
+    "min_profit_margin": 0.15,
+    "max_purchases_per_cycle": 10,
+    "diversification_enabled": true,
+    "priority_items": {
+      "12.7mm Rifle Bullets": 1,
+      "14mm Rifle Bullets": 2,
+      "9mm Rifle Bullets": 3,
+      "10 Gauge Shells": 4,
+      "12 Gauge Shells": 5,
+      "Energy Cell": 6,
+      "Gasoline": 7
+    },
+    "price_analysis_samples": 20,
+    "price_volatility_threshold": 0.3
+  },
+  "selling": {
+    "markup_percentage": 0.2,
+    "min_markup_percentage": 0.1,
+    "max_markup_percentage": 0.5,
+    "max_inventory_slots_used": 40,
+    "inventory_threshold_percentage": 0.8,
+    "max_selling_slots_used": 20,
+    "selling_slots_threshold_percentage": 0.7,
+    "price_adjustment_enabled": true
+  },
+  "risk_management": {
+    "max_consecutive_failures": 3,
+    "failure_cooldown_minutes": 30,
+    "anti_detection_enabled": true,
+    "random_delay_range": [
+      2,
+      8
+    ],
+    "max_operations_per_hour": 30
+  },
+  "performance": {
+    "market_cache_duration_minutes": 5,
+    "price_cache_duration_minutes": 10,
+    "max_concurrent_operations": 3,
+    "operation_timeout_seconds": 60,
+    "max_retries": 3,
+    "retry_delay_seconds": 5,
+    "exponential_backoff": true
+  },
+  "trading_enabled": true,
+  "debug_mode": false,
+  "dry_run_mode": false,
+  "max_trading_cycles": 10,
+  "cycle_interval_minutes": 30,
+  "session_timeout_hours": 8,
+  "detailed_logging": true,
+  "log_all_market_data": false
+}

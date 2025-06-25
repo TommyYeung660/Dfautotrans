@@ -13,6 +13,7 @@ from ..data.models import (
     InventoryItemData, SellOrder, TradingConfiguration, 
     SystemResources, SellingSlotsStatus
 )
+from ..config.trading_config import TradingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,25 @@ logger = logging.getLogger(__name__)
 class SellingStrategy:
     """智能銷售策略引擎"""
     
-    def __init__(self, config: TradingConfiguration):
+    def __init__(self, config: TradingConfiguration, trading_config: Optional[TradingConfig] = None):
         """
         初始化銷售策略
         
         Args:
-            config: 交易配置參數
+            config: 交易配置參數（向後兼容）
+            trading_config: 新的交易配置（可選）
         """
+        self.legacy_config = config
+        
+        # 使用新的配置系統
+        if trading_config:
+            self.trading_config = trading_config
+        else:
+            from ..config.trading_config import TradingConfigManager
+            config_manager = TradingConfigManager()
+            self.trading_config = config_manager.get_config()
+        
+        # 向後兼容的配置屬性
         self.config = config
         self.sell_history: List[SellOrder] = []  # 銷售歷史
         self.price_history: Dict[str, List[float]] = {}  # 物品價格歷史
@@ -41,14 +54,14 @@ class SellingStrategy:
             "misc": 0.4,      # 雜項 - 低優先級
         }
         
-        # 熱門物品的建議定價
+        # 熱門物品的建議定價（基於配置更新）
         self.popular_item_pricing = {
-            "12.7mm Rifle Bullets": {"base_price": 15.0, "markup": 1.15},
-            "7.62mm Rifle Bullets": {"base_price": 12.0, "markup": 1.15},
-            "5.56mm Rifle Bullets": {"base_price": 10.0, "markup": 1.15},
-            "12 Gauge Shells": {"base_price": 8.0, "markup": 1.20},
-            "Pain Killers": {"base_price": 25.0, "markup": 1.30},
-            "Bandages": {"base_price": 15.0, "markup": 1.25},
+            "12.7mm Rifle Bullets": {"base_price": 15.0, "markup": 1.0 + self.trading_config.selling.markup_percentage},
+            "7.62mm Rifle Bullets": {"base_price": 12.0, "markup": 1.0 + self.trading_config.selling.markup_percentage},
+            "5.56mm Rifle Bullets": {"base_price": 10.0, "markup": 1.0 + self.trading_config.selling.markup_percentage},
+            "12 Gauge Shells": {"base_price": 8.0, "markup": 1.0 + self.trading_config.selling.markup_percentage},
+            "Pain Killers": {"base_price": 25.0, "markup": 1.0 + self.trading_config.selling.markup_percentage},
+            "Bandages": {"base_price": 15.0, "markup": 1.0 + self.trading_config.selling.markup_percentage},
         }
         
         logger.info("銷售策略初始化完成")

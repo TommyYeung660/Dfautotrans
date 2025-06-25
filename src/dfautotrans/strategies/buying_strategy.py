@@ -13,6 +13,7 @@ from ..data.models import (
     MarketItemData, PurchaseOpportunity, MarketCondition, 
     TradingConfiguration, SystemResources
 )
+from ..config.trading_config import TradingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,25 @@ logger = logging.getLogger(__name__)
 class BuyingStrategy:
     """智能購買策略引擎"""
     
-    def __init__(self, config: TradingConfiguration):
+    def __init__(self, config: TradingConfiguration, trading_config: Optional[TradingConfig] = None):
         """
         初始化購買策略
         
         Args:
-            config: 交易配置參數
+            config: 交易配置參數（向後兼容）
+            trading_config: 新的交易配置（可選）
         """
+        self.legacy_config = config
+        
+        # 使用新的配置系統
+        if trading_config:
+            self.trading_config = trading_config
+        else:
+            from ..config.trading_config import TradingConfigManager
+            config_manager = TradingConfigManager()
+            self.trading_config = config_manager.get_config()
+        
+        # 向後兼容的配置屬性
         self.config = config
         self.item_history: Dict[str, List[float]] = {}  # 物品歷史價格
         self.purchase_history: List[PurchaseOpportunity] = []  # 購買歷史
@@ -50,6 +63,12 @@ class BuyingStrategy:
             "Pain Killers": {"base_price": 25.0, "demand": "high"},
             "Bandages": {"base_price": 15.0, "demand": "medium"},
         }
+        
+        # 更新熱門物品的優先級（從配置中獲取）
+        priority_items = self.trading_config.buying.priority_items
+        for item_name, priority in priority_items.items():
+            if item_name in self.popular_items:
+                self.popular_items[item_name]["priority"] = priority
         
         logger.info(f"購買策略初始化完成，最小利潤率: {config.min_profit_margin:.1%}")
 
@@ -84,7 +103,8 @@ class BuyingStrategy:
                 if opportunity:
                     # 檢查投資限制
                     item_cost = item.price * item.quantity
-                    if total_investment + item_cost <= self.config.max_total_investment:
+                    max_investment = self.trading_config.buying.max_total_investment
+                    if total_investment + item_cost <= max_investment:
                         opportunities.append(opportunity)
                         total_investment += item_cost
                         logger.debug(f"添加購買機會: {item.item_name} - 利潤率: {opportunity.profit_potential:.1%}")
