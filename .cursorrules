@@ -1,0 +1,33 @@
+# Dead Frontier Auto Trading System - Cursor Rules
+
+## MCP Integration Rules
+
+### Playwright MCP
+- Use for page analysis, element interaction, and debugging
+- MCP is for development, Python code is for production
+
+### OpenMemory MCP  
+- Always search memories at conversation start
+- Store user preferences, error solutions, and successful strategies
+- Use for persistent context across sessions
+
+## General Development Rules
+
+### Code Quality
+- Prioritize anti-detection and human behavior simulation
+- Implement comprehensive error handling and logging
+- Use proper async/await patterns for Playwright operations
+
+### Project Structure
+- Main automation modules in `src/dfautotrans/automation/`
+- Configuration in `src/dfautotrans/config/`
+- Database models in `src/dfautotrans/data/`
+- Tests in `tests/` directory with proper categorization
+
+### Security
+- Never commit sensitive data (passwords, API keys)
+- Use environment variables for configuration
+- Implement secure cookie and session management
+
+### User Interaction
+- Store user preferences using OpenMemory MCP for future reference 

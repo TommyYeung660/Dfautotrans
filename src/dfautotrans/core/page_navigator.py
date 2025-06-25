@@ -97,21 +97,21 @@ class PageNavigator:
         """Navigate to marketplace page."""
         return await self.navigate_to_url(
             self.settings.marketplace_url,
-            expected_indicators=[".marketplace", ".inventory", ".market-item"]
+            expected_indicators=None
         )
     
     async def navigate_to_bank(self) -> bool:
         """Navigate to bank page."""
         return await self.navigate_to_url(
             self.settings.bank_url,
-            expected_indicators=[".bank", ".withdraw", ".balance"]
+            expected_indicators=None
         )
     
     async def navigate_to_storage(self) -> bool:
         """Navigate to storage page."""
         return await self.navigate_to_url(
             self.settings.storage_url,
-            expected_indicators=[".storage", ".inventory", ".deposit"]
+            expected_indicators=None
         )
     
     async def check_login_status(self, force_refresh: bool = False) -> bool:

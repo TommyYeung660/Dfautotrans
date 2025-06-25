@@ -111,10 +111,31 @@ class Stage2InventoryDemo:
         logger.info("1️⃣ 檢查庫存狀態...")
         inventory_status = await self.inventory_manager.get_inventory_status()
         if inventory_status:
-            logger.info(f"✅ 庫存狀態: {inventory_status.current_count}/{inventory_status.max_capacity}")
-            logger.info(f"   可用空間: {inventory_status.available_space}")
-            logger.info(f"   使用率: {inventory_status.utilization_rate:.1%}")
-            logger.info(f"   是否已滿: {'是' if inventory_status.is_full else '否'}")
+            used = inventory_status.get('used', 0)
+            total = inventory_status.get('total', 0)
+            available = total - used
+            utilization = (used / total) if total > 0 else 0
+            is_full = used >= total
+            items = inventory_status.get('items', [])
+            
+            logger.info(f"✅ 庫存狀態: {used}/{total}")
+            logger.info(f"   可用空間: {available}")
+            logger.info(f"   使用率: {utilization:.1%}")
+            logger.info(f"   是否已滿: {'是' if is_full else '否'}")
+            
+            if items:
+                logger.info(f"   📋 庫存物品詳情 ({len(items)}件):")
+                for item in items:
+                    if hasattr(item, 'to_dict'):
+                        item_dict = item.to_dict()
+                        if item_dict['quantity'] > 1:
+                            logger.info(f"     • 槽位{item_dict['slot']}: {item_dict['name']} x{item_dict['quantity']} ({item_dict['category']})")
+                        else:
+                            logger.info(f"     • 槽位{item_dict['slot']}: {item_dict['name']} ({item_dict['category']})")
+                    else:
+                        logger.info(f"     • {item}")
+            else:
+                logger.info("   📋 庫存為空")
         else:
             logger.error("❌ 無法獲取庫存狀態")
         
@@ -122,10 +143,31 @@ class Stage2InventoryDemo:
         logger.info("\n2️⃣ 檢查倉庫狀態...")
         storage_status = await self.inventory_manager.get_storage_status()
         if storage_status:
-            logger.info(f"✅ 倉庫狀態: {storage_status.current_count}/{storage_status.max_capacity}")
-            logger.info(f"   可用空間: {storage_status.available_space}")
-            logger.info(f"   使用率: {storage_status.utilization_rate:.1%}")
-            logger.info(f"   是否已滿: {'是' if storage_status.is_full else '否'}")
+            used = storage_status.get('used', 0)
+            total = storage_status.get('total', 0)
+            available = total - used
+            utilization = (used / total) if total > 0 else 0
+            is_full = used >= total
+            items = storage_status.get('items', [])
+            
+            logger.info(f"✅ 倉庫狀態: {used}/{total}")
+            logger.info(f"   可用空間: {available}")
+            logger.info(f"   使用率: {utilization:.1%}")
+            logger.info(f"   是否已滿: {'是' if is_full else '否'}")
+            
+            if items:
+                logger.info(f"   📋 倉庫物品詳情 ({len(items)}件):")
+                for item in items:
+                    if hasattr(item, 'to_dict'):
+                        item_dict = item.to_dict()
+                        if item_dict['quantity'] > 1:
+                            logger.info(f"     • 槽位{item_dict['slot']}: {item_dict['name']} x{item_dict['quantity']} ({item_dict['category']})")
+                        else:
+                            logger.info(f"     • 槽位{item_dict['slot']}: {item_dict['name']} ({item_dict['category']})")
+                    else:
+                        logger.info(f"     • {item}")
+            else:
+                logger.info("   📋 倉庫為空")
         else:
             logger.error("❌ 無法獲取倉庫狀態")
         
@@ -200,10 +242,13 @@ class Stage2InventoryDemo:
             logger.info("   重新檢查庫存狀態...")
             new_inventory_status = await self.inventory_manager.get_inventory_status()
             if new_inventory_status:
-                logger.info(f"   優化後庫存: {new_inventory_status.current_count}/{new_inventory_status.max_capacity}")
+                new_used = new_inventory_status.get('used', 0)
+                new_total = new_inventory_status.get('total', 0)
+                logger.info(f"   優化後庫存: {new_used}/{new_total}")
                 
                 if inventory_status:
-                    space_freed = inventory_status.current_count - new_inventory_status.current_count
+                    old_used = inventory_status.get('used', 0)
+                    space_freed = old_used - new_used
                     if space_freed > 0:
                         logger.info(f"   釋放了 {space_freed} 個空間")
                     else:
@@ -225,12 +270,23 @@ class Stage2InventoryDemo:
         initial_storage = await self.inventory_manager.get_storage_status()
         
         if initial_inventory:
-            logger.info(f"   操作前庫存: {initial_inventory.current_count}/{initial_inventory.max_capacity}")
+            inv_used = initial_inventory.get('used', 0)
+            inv_total = initial_inventory.get('total', 0)
+            inv_items = initial_inventory.get('items', [])
+            logger.info(f"   操作前庫存: {inv_used}/{inv_total}")
+            if inv_items:
+                logger.info(f"   庫存物品: {[str(item) for item in inv_items]}")
+        
         if initial_storage:
-            logger.info(f"   操作前倉庫: {initial_storage.current_count}/{initial_storage.max_capacity}")
+            stor_used = initial_storage.get('used', 0)
+            stor_total = initial_storage.get('total', 0)
+            stor_items = initial_storage.get('items', [])
+            logger.info(f"   操作前倉庫: {stor_used}/{stor_total}")
+            if stor_items:
+                logger.info(f"   倉庫物品: {[str(item) for item in stor_items[:5]]}{'...' if len(stor_items) > 5 else ''}")  # 只顯示前5件
         
         # 2. 測試存入所有物品到倉庫
-        if initial_inventory and initial_inventory.current_count > 0:
+        if initial_inventory and initial_inventory.get('used', 0) > 0:
             logger.info("\n2️⃣ 測試存入所有物品到倉庫...")
             
             deposit_result = await self.inventory_manager.deposit_all_to_storage()
@@ -244,20 +300,29 @@ class Stage2InventoryDemo:
                 final_storage = await self.inventory_manager.get_storage_status()
                 
                 if final_inventory:
-                    logger.info(f"   操作後庫存: {final_inventory.current_count}/{final_inventory.max_capacity}")
+                    final_inv_used = final_inventory.get('used', 0)
+                    final_inv_total = final_inventory.get('total', 0)
+                    final_inv_items = final_inventory.get('items', [])
+                    logger.info(f"   操作後庫存: {final_inv_used}/{final_inv_total}")
                     
-                    if initial_inventory.current_count > final_inventory.current_count:
-                        moved_items = initial_inventory.current_count - final_inventory.current_count
+                    initial_inv_used = initial_inventory.get('used', 0)
+                    if initial_inv_used > final_inv_used:
+                        moved_items = initial_inv_used - final_inv_used
                         logger.info(f"   ✅ 成功轉移了 {moved_items} 件物品到倉庫")
                     else:
                         logger.info("   ℹ️ 庫存物品數量無變化")
                 
                 if final_storage:
-                    logger.info(f"   操作後倉庫: {final_storage.current_count}/{final_storage.max_capacity}")
+                    final_stor_used = final_storage.get('used', 0)
+                    final_stor_total = final_storage.get('total', 0)
+                    final_stor_items = final_storage.get('items', [])
+                    logger.info(f"   操作後倉庫: {final_stor_used}/{final_stor_total}")
                     
-                    if initial_storage and final_storage.current_count > initial_storage.current_count:
-                        received_items = final_storage.current_count - initial_storage.current_count
-                        logger.info(f"   ✅ 倉庫接收了 {received_items} 件物品")
+                    if initial_storage:
+                        initial_stor_used = initial_storage.get('used', 0)
+                        if final_stor_used > initial_stor_used:
+                            received_items = final_stor_used - initial_stor_used
+                            logger.info(f"   ✅ 倉庫接收了 {received_items} 件物品")
                         
             else:
                 logger.error("❌ 存入操作執行失敗")
@@ -265,7 +330,8 @@ class Stage2InventoryDemo:
             logger.info("2️⃣ 庫存中沒有物品，跳過存入操作演示")
         
         # 3. 測試從倉庫取出所有物品
-        if initial_storage and initial_storage.current_count > 0:
+        current_storage = await self.inventory_manager.get_storage_status()
+        if current_storage and current_storage.get('used', 0) > 0:
             logger.info("\n3️⃣ 測試從倉庫取出所有物品...")
             
             withdraw_result = await self.inventory_manager.withdraw_all_from_storage()
@@ -279,10 +345,17 @@ class Stage2InventoryDemo:
                 final_storage_2 = await self.inventory_manager.get_storage_status()
                 
                 if final_storage_2:
-                    logger.info(f"   操作後倉庫: {final_storage_2.current_count}/{final_storage_2.max_capacity}")
+                    final_stor_used_2 = final_storage_2.get('used', 0)
+                    final_stor_total_2 = final_storage_2.get('total', 0)
+                    logger.info(f"   操作後倉庫: {final_stor_used_2}/{final_stor_total_2}")
                 
                 if final_inventory_2:
-                    logger.info(f"   操作後庫存: {final_inventory_2.current_count}/{final_inventory_2.max_capacity}")
+                    final_inv_used_2 = final_inventory_2.get('used', 0)
+                    final_inv_total_2 = final_inventory_2.get('total', 0)
+                    final_inv_items_2 = final_inventory_2.get('items', [])
+                    logger.info(f"   操作後庫存: {final_inv_used_2}/{final_inv_total_2}")
+                    if final_inv_items_2:
+                        logger.info(f"   恢復的物品: {[str(item) for item in final_inv_items_2]}")
                         
             else:
                 logger.error("❌ 取出操作執行失敗")
@@ -307,9 +380,32 @@ class Stage2InventoryDemo:
             logger.info(f"   💰 現金: ${player_resources.cash_on_hand:,}")
             logger.info(f"   🏦 銀行: ${player_resources.bank_balance:,}")
             logger.info(f"   💵 總資金: ${player_resources.total_available_cash:,}")
-            logger.info(f"   📦 庫存: {player_resources.inventory_status.current_count}/{player_resources.inventory_status.max_capacity}")
-            logger.info(f"   🏪 倉庫: {player_resources.storage_status.current_count}/{player_resources.storage_status.max_capacity}")
-            logger.info(f"   🛒 銷售位: {player_resources.selling_slots_status.current_listings}/{player_resources.selling_slots_status.max_slots}")
+            
+            # 處理庫存狀態 - 可能是字典格式
+            if hasattr(player_resources, 'inventory_status') and player_resources.inventory_status:
+                inv_status = player_resources.inventory_status
+                if isinstance(inv_status, dict):
+                    inv_used = inv_status.get('used', 0)
+                    inv_total = inv_status.get('total', 0)
+                    logger.info(f"   📦 庫存: {inv_used}/{inv_total}")
+                else:
+                    logger.info(f"   📦 庫存: {inv_status.current_count}/{inv_status.max_capacity}")
+            
+            # 處理倉庫狀態 - 可能是字典格式
+            if hasattr(player_resources, 'storage_status') and player_resources.storage_status:
+                stor_status = player_resources.storage_status
+                if isinstance(stor_status, dict):
+                    stor_used = stor_status.get('used', 0)
+                    stor_total = stor_status.get('total', 0)
+                    logger.info(f"   🏪 倉庫: {stor_used}/{stor_total}")
+                else:
+                    logger.info(f"   🏪 倉庫: {stor_status.current_count}/{stor_status.max_capacity}")
+            
+            # 處理銷售位狀態
+            if hasattr(player_resources, 'selling_slots_status') and player_resources.selling_slots_status:
+                sell_status = player_resources.selling_slots_status
+                logger.info(f"   🛒 銷售位: {sell_status.current_listings}/{sell_status.max_slots}")
+            
             logger.info(f"   ✅ 可交易: {'是' if player_resources.can_trade else '否'}")
             logger.info(f"   🚫 完全阻塞: {'是' if player_resources.is_completely_blocked else '否'}")
         else:
@@ -362,9 +458,9 @@ class Stage2InventoryDemo:
             logger.error(f"⚠️ 清理過程中出錯: {e}")
     
     async def run_full_demo(self):
-        """運行完整演示"""
+        """運行簡化的Storage演示"""
         try:
-            logger.info("🎬 開始階段2庫存管理完整演示")
+            logger.info("🎬 開始階段2庫存管理Storage演示")
             logger.info("=" * 80)
             
             # 初始化系統
@@ -377,31 +473,84 @@ class Stage2InventoryDemo:
                 logger.error("❌ 登錄演示失敗")
                 return
             
-            # 庫存狀態檢查
-            inventory_status, storage_status, selling_status = await self.demonstrate_inventory_status_check()
+            logger.info("\n" + "="*60)
+            logger.info("📦 開始Storage狀態檢查和操作演示")
+            logger.info("="*60)
             
-            # 庫存物品檢索
-            inventory_items = await self.demonstrate_inventory_items_retrieval()
+            # 1. 獲取初始狀態
+            logger.info("1️⃣ 檢查初始狀態...")
+            inventory_status = await self.inventory_manager.get_inventory_status()
+            storage_status = await self.inventory_manager.get_storage_status()
+            selling_status = await self.inventory_manager.get_selling_slots_status()
             
-            # 空間管理
-            await self.demonstrate_space_management(inventory_status)
+            if inventory_status:
+                used = inventory_status.get('used', 0)
+                total = inventory_status.get('total', 0)
+                logger.info(f"✅ 庫存狀態: {used}/{total}")
             
-            # 存儲操作
-            await self.demonstrate_storage_operations()
+            if storage_status:
+                used = storage_status.get('used', 0)
+                total = storage_status.get('total', 0)
+                logger.info(f"✅ 倉庫狀態: {used}/{total}")
             
-            # 整合資源管理
-            await self.demonstrate_integrated_resource_management()
+            if selling_status:
+                logger.info(f"✅ 銷售位狀態: {selling_status.current_listings}/{selling_status.max_slots}")
+            
+            # 2. 測試存儲操作
+            logger.info("\n2️⃣ 測試存儲操作...")
+            
+            # 如果倉庫有物品，嘗試取出
+            if storage_status and storage_status.get('used', 0) > 0:
+                logger.info("   嘗試從倉庫取出物品...")
+                withdraw_result = await self.inventory_manager.withdraw_all_from_storage()
+                if withdraw_result:
+                    logger.info("   ✅ 從倉庫取出操作成功")
+                    
+                    # 檢查操作後狀態
+                    new_inventory = await self.inventory_manager.get_inventory_status()
+                    new_storage = await self.inventory_manager.get_storage_status()
+                    
+                    if new_inventory:
+                        new_inv_used = new_inventory.get('used', 0)
+                        logger.info(f"   操作後庫存: {new_inv_used}/{new_inventory.get('total', 0)}")
+                    
+                    if new_storage:
+                        new_stor_used = new_storage.get('used', 0)
+                        logger.info(f"   操作後倉庫: {new_stor_used}/{new_storage.get('total', 0)}")
+                else:
+                    logger.error("   ❌ 從倉庫取出操作失敗")
+            else:
+                logger.info("   倉庫為空，跳過取出操作")
+            
+            # 如果庫存有物品，嘗試存入
+            final_inventory = await self.inventory_manager.get_inventory_status()
+            if final_inventory and final_inventory.get('used', 0) > 0:
+                logger.info("   嘗試將庫存物品存入倉庫...")
+                deposit_result = await self.inventory_manager.deposit_all_to_storage()
+                if deposit_result:
+                    logger.info("   ✅ 存入倉庫操作成功")
+                    
+                    # 檢查最終狀態
+                    final_inventory_2 = await self.inventory_manager.get_inventory_status()
+                    final_storage_2 = await self.inventory_manager.get_storage_status()
+                    
+                    if final_inventory_2:
+                        logger.info(f"   最終庫存: {final_inventory_2.get('used', 0)}/{final_inventory_2.get('total', 0)}")
+                    
+                    if final_storage_2:
+                        logger.info(f"   最終倉庫: {final_storage_2.get('used', 0)}/{final_storage_2.get('total', 0)}")
+                else:
+                    logger.error("   ❌ 存入倉庫操作失敗")
+            else:
+                logger.info("   庫存為空，跳過存入操作")
             
             logger.info("\n" + "="*80)
-            logger.info("🎉 階段2庫存管理演示完成！")
+            logger.info("🎉 階段2Storage演示完成！")
             logger.info("主要功能驗證:")
             logger.info("✅ 庫存狀態檢查")
             logger.info("✅ 倉庫狀態檢查")
             logger.info("✅ 銷售位狀態檢查")
-            logger.info("✅ 庫存物品檢索")
-            logger.info("✅ 空間管理和優化")
-            logger.info("✅ 存儲操作")
-            logger.info("✅ 整合資源管理")
+            logger.info("✅ Storage存取操作")
             logger.info("🚀 準備進入階段3開發")
             logger.info("="*80)
             

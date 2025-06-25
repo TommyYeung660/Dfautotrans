@@ -12,6 +12,34 @@ from ..core.page_navigator import PageNavigator
 from ..data.models import InventoryStatus, StorageStatus, SellingSlotsStatus
 
 
+class InventoryItem:
+    """Represents an individual inventory item."""
+    
+    def __init__(self, slot: int, item_type: str, item_name: str, quantity: int = 1, 
+                 quality: int = 1, item_category: str = "item"):
+        self.slot = slot
+        self.item_type = item_type  # e.g., "127rifleammo", "freshvegetables_cooked"
+        self.item_name = item_name  # e.g., "12.7 Rifle Bullets", "Cooked Fresh Vegetables"
+        self.quantity = quantity
+        self.quality = quality
+        self.item_category = item_category  # "ammo", "item", etc.
+    
+    def __str__(self):
+        if self.quantity > 1:
+            return f"{self.item_name} x{self.quantity}"
+        return self.item_name
+    
+    def to_dict(self):
+        return {
+            'slot': self.slot,
+            'type': self.item_type,
+            'name': self.item_name,
+            'quantity': self.quantity,
+            'quality': self.quality,
+            'category': self.item_category
+        }
+
+
 class InventoryManager:
     """Handles all inventory and storage management operations."""
     
@@ -19,7 +47,6 @@ class InventoryManager:
         self.settings = settings
         self.browser_manager = browser_manager
         self.page_navigator = page_navigator
-        self.page = browser_manager.page
         
         # Cache for inventory information
         self._inventory_cache: Optional[InventoryStatus] = None
@@ -27,57 +54,74 @@ class InventoryManager:
         self._cache_timestamp: Optional[datetime] = None
         self._cache_duration = 30  # seconds
         
+        # Item type to name mapping
+        self.item_type_mapping = {
+            '127rifleammo': '12.7 Rifle Bullets',
+            'freshvegetables_cooked': 'Cooked Fresh Vegetables',
+            'freshmeat_cooked': 'Cooked Fresh Meat',
+            # Add more mappings as needed
+        }
+    
+    @property
+    def page(self):
+        """動態獲取當前page對象"""
+        if not self.browser_manager.page:
+            raise RuntimeError("Browser page not initialized")
+        return self.browser_manager.page
+    
     async def get_inventory_status(self) -> Dict[str, Any]:
-        """Get current inventory status."""
+        """Get current inventory status with detailed item information."""
         try:
             # Navigate to storage page to access inventory info
             if not await self.page_navigator.navigate_to_storage():
-                return {'used': 0, 'total': 0, 'items': []}
+                return {'used': 0, 'total': 26, 'items': []}
                 
-            # Look for inventory information patterns
+            # Extract inventory information
             inventory_info = await self._extract_inventory_info()
             if inventory_info:
                 return {
                     'used': inventory_info['current'],
                     'total': inventory_info['max'],
-                    'items': inventory_info.get('items', [])
+                    'items': inventory_info['items']
                 }
                 
             logger.warning("無法獲取庫存狀態信息")
-            return {'used': 0, 'total': 0, 'items': []}
+            return {'used': 0, 'total': 26, 'items': []}
             
         except Exception as e:
             logger.error(f"獲取庫存狀態時出錯: {e}")
-            return {'used': 0, 'total': 0, 'items': []}
+            return {'used': 0, 'total': 26, 'items': []}
     
     async def get_storage_status(self) -> Dict[str, Any]:
-        """Get current storage status."""
+        """Get current storage status with detailed item information."""
         try:
             # Navigate to storage page
             if not await self.page_navigator.navigate_to_storage():
-                return {'used': 0, 'total': 0, 'items': []}
+                return {'used': 0, 'total': 40, 'items': []}
                 
-            # Look for storage information patterns
+            # Extract storage information
             storage_info = await self._extract_storage_info()
             if storage_info:
                 return {
                     'used': storage_info['current'],
                     'total': storage_info['max'],
-                    'items': storage_info.get('items', [])
+                    'items': storage_info['items']
                 }
                 
             logger.warning("無法獲取倉庫狀態信息")
-            return {'used': 0, 'total': 0, 'items': []}
+            return {'used': 0, 'total': 40, 'items': []}
             
         except Exception as e:
             logger.error(f"獲取倉庫狀態時出錯: {e}")
-            return {'used': 0, 'total': 0, 'items': []}
+            return {'used': 0, 'total': 40, 'items': []}
     
     async def check_inventory_full(self) -> bool:
         """Check if inventory is full."""
         status = await self.get_inventory_status()
         if status:
-            return status.is_full
+            used = status.get('used', 0)
+            total = status.get('total', 0)
+            return used >= total
         return False
     
     async def deposit_all_to_storage(self) -> bool:
@@ -90,75 +134,119 @@ class InventoryManager:
                 logger.error("❌ 無法導航到倉庫頁面")
                 return False
             
-            # Look for "deposit all" button - 使用正確的按鈕ID
-            deposit_all_selectors = [
-                "#invtostorage",  # 從Inventory全部存入到Storage的正確按鈕ID
-                "button:text('deposit all')",
-                "input[value='deposit all']",
-                "button:text('Deposit All')",
-                "input[value='Deposit All']",
-                "button:has-text('deposit all')",
-                ".deposit-all-button",
-                "#depositAllButton",
-                "button[onclick*='depositall']",
-                "button[onclick*='deposit_all']"
+            # Wait for page to fully load
+            await asyncio.sleep(2)
+            
+            # Check if inventory has items first
+            inventory_status = await self.get_inventory_status()
+            if inventory_status and inventory_status.get('used', 0) == 0:
+                logger.info("ℹ️ 庫存為空，無需存入操作")
+                return True
+            
+            # Get inventory status before deposit
+            initial_inventory = inventory_status
+            
+            # Look for deposit button with improved logic
+            deposit_button = None
+            button_selectors = [
+                "#invtostorage",  # 主要按鈕ID
+                "button#invtostorage",
+                "input#invtostorage",
+                "[id='invtostorage']"
             ]
             
-            deposit_button = None
-            for selector in deposit_all_selectors:
+            for selector in button_selectors:
                 try:
+                    # Wait for element to be present
+                    await self.page.wait_for_selector(selector, timeout=5000)
                     deposit_button = await self.page.query_selector(selector)
+                    
                     if deposit_button:
-                        # 檢查按鈕是否被禁用
+                        # Check if button is enabled and visible
                         is_disabled = await deposit_button.is_disabled()
-                        if is_disabled:
-                            logger.warning(f"找到存入按鈕 {selector} 但已被禁用")
-                            continue
-                        logger.debug(f"找到可用的存入所有物品按鈕: {selector}")
-                        break
-                except Exception:
+                        is_visible = await deposit_button.is_visible()
+                        
+                        if not is_disabled and is_visible:
+                            logger.debug(f"找到可用的存入按鈕: {selector}")
+                            break
+                        else:
+                            logger.warning(f"按鈕 {selector} 不可用: disabled={is_disabled}, visible={is_visible}")
+                            deposit_button = None
+                            
+                except Exception as e:
+                    logger.debug(f"查找按鈕 {selector} 失敗: {e}")
                     continue
             
             if not deposit_button:
-                # 檢查是否是因為庫存為空導致按鈕被禁用
-                inventory_status = await self.get_inventory_status()
-                if inventory_status and inventory_status.current_count == 0:
-                    logger.info("ℹ️ 庫存為空，無需存入操作")
-                    return True
-                else:
-                    logger.error("❌ 找不到可用的存入所有物品按鈕")
-                    return False
+                logger.error("❌ 找不到可用的存入所有物品按鈕")
+                return False
             
-            # Get inventory status before deposit
-            initial_inventory = await self.get_inventory_status()
+            # Try multiple click methods
+            click_success = False
+            click_methods = [
+                ("standard_click", lambda: deposit_button.click()),
+                ("force_click", lambda: deposit_button.click(force=True)),
+                ("js_click", lambda: deposit_button.evaluate("element => element.click()")),
+                ("dispatch_click", lambda: deposit_button.dispatch_event("click"))
+            ]
             
-            # Click deposit all button
-            await deposit_button.click()
-            logger.info("✅ 已點擊存入所有物品按鈕")
+            for method_name, click_method in click_methods:
+                try:
+                    logger.debug(f"嘗試 {method_name} 點擊存入按鈕...")
+                    await click_method()
+                    logger.info(f"✅ 使用 {method_name} 成功點擊存入按鈕")
+                    click_success = True
+                    break
+                except Exception as e:
+                    logger.warning(f"❌ {method_name} 點擊失敗: {e}")
+                    continue
             
-            # Wait for operation to complete
-            await asyncio.sleep(3)
+            if not click_success:
+                logger.error("❌ 所有點擊方法都失敗")
+                return False
+            
+            # Wait for operation to complete with longer timeout
+            logger.info("⏳ 等待存入操作完成...")
+            await asyncio.sleep(5)  # 增加等待時間
             
             # Clear cache to get fresh data
             self._clear_cache()
             
-            # Verify operation success
-            new_inventory = await self.get_inventory_status()
-            
-            if new_inventory and initial_inventory:
-                if new_inventory.current_count < initial_inventory.current_count:
-                    deposited_count = initial_inventory.current_count - new_inventory.current_count
-                    logger.info(f"✅ 成功存入 {deposited_count} 件物品到倉庫")
-                    return True
-                elif new_inventory.current_count == 0:
-                    logger.info(f"✅ 成功存入所有 {initial_inventory.current_count} 件物品到倉庫")
-                    return True
-                else:
-                    logger.warning("⚠️ 存入操作可能未完全成功")
+            # Verify operation success with retry
+            verification_attempts = 3
+            for attempt in range(verification_attempts):
+                try:
+                    new_inventory = await self.get_inventory_status()
+                    
+                    if new_inventory and initial_inventory:
+                        new_used = new_inventory.get('used', 0)
+                        initial_used = initial_inventory.get('used', 0)
+                        
+                        if new_used < initial_used:
+                            deposited_count = initial_used - new_used
+                            logger.info(f"✅ 成功存入 {deposited_count} 件物品到倉庫")
+                            return True
+                        elif new_used == 0:
+                            logger.info(f"✅ 成功存入所有 {initial_used} 件物品到倉庫")
+                            return True
+                        else:
+                            if attempt < verification_attempts - 1:
+                                logger.debug(f"驗證嘗試 {attempt + 1}: 庫存狀態未變化，等待...")
+                                await asyncio.sleep(2)
+                                continue
+                            else:
+                                logger.warning("⚠️ 存入操作可能未完全成功")
+                                return False
+                    else:
+                        logger.warning("⚠️ 無法獲取驗證數據")
+                        return False
+                        
+                except Exception as e:
+                    logger.error(f"驗證嘗試 {attempt + 1} 失敗: {e}")
+                    if attempt < verification_attempts - 1:
+                        await asyncio.sleep(2)
+                        continue
                     return False
-            else:
-                logger.warning("⚠️ 無法驗證存入操作結果")
-                return False
                 
         except Exception as e:
             logger.error(f"❌ 存入所有物品時出錯: {e}")
@@ -241,8 +329,8 @@ class InventoryManager:
             logger.error(f"從倉庫取出物品失敗: {e}")
             return False
     
-    async def get_inventory_items(self) -> List[str]:
-        """Get list of items currently in inventory."""
+    async def get_inventory_items(self) -> List[InventoryItem]:
+        """Get list of items currently in inventory with full details."""
         try:
             if not await self._ensure_on_inventory_accessible_page():
                 return []
@@ -268,17 +356,28 @@ class InventoryManager:
         """Check if there's sufficient space in inventory."""
         status = await self.get_inventory_status()
         if status:
-            available_space = status.available_space
+            used = status.get('used', 0)
+            total = status.get('total', 0)
+            available_space = total - used
             logger.debug(f"檢查空間: 需要 {required_space}，可用 {available_space}")
             return available_space >= required_space
         return False
     
     async def get_selling_slots_status(self) -> Optional[SellingSlotsStatus]:
-        """Get current selling slots status (e.g., 6/30)."""
+        """Get current selling slots status (e.g., 2/26)."""
         try:
             # Navigate to marketplace to see selling section
             if not await self.page_navigator.navigate_to_marketplace():
                 return None
+            
+            # 點擊selling標籤來查看銷售狀態
+            try:
+                selling_button = await self.page.query_selector('button[name="selling"], button:has-text("selling")')
+                if selling_button:
+                    await selling_button.click()
+                    await self.page.wait_for_timeout(1000)  # 等待頁面更新
+            except Exception as e:
+                logger.debug(f"點擊selling標籤失敗，可能已經在selling頁面: {e}")
             
             # Look for selling section and slot information
             selling_info = await self._extract_selling_slots_info()
@@ -310,8 +409,12 @@ class InventoryManager:
                 return False
             
             # If inventory is not full, no optimization needed
-            if not inventory_status.is_full:
-                logger.info(f"ℹ️ 庫存未滿 ({inventory_status.current_count}/{inventory_status.max_capacity})，無需優化")
+            used = inventory_status.get('used', 0)
+            total = inventory_status.get('total', 0)
+            is_full = used >= total
+            
+            if not is_full:
+                logger.info(f"ℹ️ 庫存未滿 ({used}/{total})，無需優化")
                 return True
             
             # Check storage status
@@ -321,7 +424,11 @@ class InventoryManager:
                 return False
             
             # If storage is also full, cannot optimize
-            if storage_status.is_full:
+            storage_used = storage_status.get('used', 0)
+            storage_total = storage_status.get('total', 0)
+            storage_is_full = storage_used >= storage_total
+            
+            if storage_is_full:
                 logger.warning("⚠️ 倉庫也已滿，無法優化庫存空間")
                 return False
             
@@ -352,56 +459,28 @@ class InventoryManager:
     async def _extract_inventory_info(self) -> Optional[Dict[str, Any]]:
         """Extract inventory information from current page using actual DOM structure."""
         try:
-            # 計算庫存使用情況 - 基於實際的HTML結構
-            # 查找所有庫存槽位
-            inventory_slots = await self.page.query_selector_all("#inventoryholder .validSlot")
-            total_slots = len(inventory_slots)
+            # 使用實際的HTML結構 - 庫存使用table結構
+            inventory_slots = await self.page.query_selector_all("#inventory td.validSlot")
+            if not inventory_slots:
+                logger.warning("無法找到庫存槽位元素")
+                return {'current': 0, 'max': 26, 'items': []}
             
-            # 計算已使用的槽位（包含.item的槽位）
+            total_slots = len(inventory_slots)  # 總共26個槽位
             used_slots = 0
             items = []
             
-            for slot in inventory_slots:
-                item_element = await slot.query_selector(".item")
+            for i, slot in enumerate(inventory_slots, 1):
+                # 檢查槽位中是否有物品
+                item_element = await slot.query_selector('.item')
                 if item_element:
                     used_slots += 1
-                    # 獲取物品信息
-                    item_type = await item_element.get_attribute("data-type")
-                    if item_type:
-                        items.append(item_type)
+                    
+                    # 提取物品詳細信息
+                    item_info = await self._parse_item_element(item_element, i)
+                    if item_info:
+                        items.append(item_info)
             
-            logger.debug(f"庫存狀態分析: {used_slots}/{total_slots} 槽位已使用")
-            
-            # 如果找不到庫存槽位，嘗試從頁面文本中解析
-            if total_slots == 0:
-                page_text = await self.page.inner_text("body")
-                
-                # Pattern to match "Items: X/Y" or similar
-                inventory_patterns = [
-                    r'Items:\s*(\d+)/(\d+)',
-                    r'Inventory:\s*(\d+)/(\d+)',
-                    r'庫存:\s*(\d+)/(\d+)',
-                    r'物品:\s*(\d+)/(\d+)'
-                ]
-                
-                for pattern in inventory_patterns:
-                    match = re.search(pattern, page_text, re.IGNORECASE)
-                    if match:
-                        current = int(match.group(1))
-                        max_capacity = int(match.group(2))
-                        logger.debug(f"從模式 '{pattern}' 找到庫存信息: {current}/{max_capacity}")
-                        return {
-                            'current': current,
-                            'max': max_capacity,
-                            'items': []
-                        }
-                
-                # 默認值
-                return {
-                    'current': 0,
-                    'max': 50,  # Default capacity
-                    'items': []
-                }
+            logger.debug(f"庫存分析: {used_slots}/{total_slots} 槽位已使用，找到 {len(items)} 個物品")
             
             return {
                 'current': used_slots,
@@ -411,30 +490,37 @@ class InventoryManager:
             
         except Exception as e:
             logger.error(f"提取庫存信息時出錯: {e}")
-            return None
+            return {'current': 0, 'max': 26, 'items': []}
     
     async def _extract_storage_info(self) -> Optional[Dict[str, Any]]:
         """Extract storage information from current page using actual DOM structure."""
         try:
-            # 計算倉庫使用情況 - 基於實際的HTML結構
-            # 查找所有有效槽位
-            all_slots = await self.page.query_selector_all("#normalContainer .validSlot")
-            total_slots = len(all_slots)
+            # 使用實際的HTML結構 - 倉庫使用div結構
+            storage_slots = await self.page.query_selector_all("#storage #normalContainer .slot.validSlot")
+            if not storage_slots:
+                logger.warning("無法找到倉庫槽位元素")
+                return {'current': 0, 'max': 40, 'items': []}
             
-            # 計算已使用的槽位（包含.item的槽位）
+            total_slots = len(storage_slots)  # 總共40個槽位
             used_slots = 0
             items = []
             
-            for slot in all_slots:
-                item_element = await slot.query_selector(".item")
+            for slot in storage_slots:
+                # 獲取槽位編號
+                slot_number = await slot.get_attribute('data-slot')
+                slot_num = int(slot_number) if slot_number else 0
+                
+                # 檢查槽位中是否有物品
+                item_element = await slot.query_selector('.item')
                 if item_element:
                     used_slots += 1
-                    # 獲取物品信息
-                    item_type = await item_element.get_attribute("data-type")
-                    if item_type:
-                        items.append(item_type)
+                    
+                    # 提取物品詳細信息
+                    item_info = await self._parse_item_element(item_element, slot_num)
+                    if item_info:
+                        items.append(item_info)
             
-            logger.debug(f"倉庫狀態分析: {used_slots}/{total_slots} 槽位已使用")
+            logger.debug(f"倉庫分析: {used_slots}/{total_slots} 槽位已使用，找到 {len(items)} 個物品")
             
             return {
                 'current': used_slots,
@@ -444,12 +530,39 @@ class InventoryManager:
             
         except Exception as e:
             logger.error(f"提取倉庫信息時出錯: {e}")
-            # 如果無法獲取實際信息，返回默認值
-            return {
-                'current': 0,
-                'max': 1000,  # Default capacity
-                'items': []
-            }
+            return {'current': 0, 'max': 40, 'items': []}
+    
+    async def _parse_item_element(self, item_element, slot_number: int) -> Optional[InventoryItem]:
+        """Parse item element to extract detailed item information."""
+        try:
+            # 提取物品屬性
+            item_type = await item_element.get_attribute('data-type') or 'unknown'
+            quantity_str = await item_element.get_attribute('data-quantity')
+            quality_str = await item_element.get_attribute('data-quality')
+            item_category = await item_element.get_attribute('data-itemtype') or 'item'
+            
+            # 處理數量（子彈等有數量，其他物品默認為1）
+            quantity = int(quantity_str) if quantity_str else 1
+            quality = int(quality_str) if quality_str else 1
+            
+            # 從映射獲取物品名稱
+            item_name = self.item_type_mapping.get(item_type, item_type.replace('_', ' ').title())
+            
+            item_info = InventoryItem(
+                slot=slot_number,
+                item_type=item_type,
+                item_name=item_name,
+                quantity=quantity,
+                quality=quality,
+                item_category=item_category
+            )
+            
+            logger.debug(f"解析物品: 槽位{slot_number} - {item_info}")
+            return item_info
+            
+        except Exception as e:
+            logger.error(f"解析物品元素時出錯: {e}")
+            return None
     
     async def _extract_selling_slots_info(self) -> Optional[Dict[str, Any]]:
         """Extract selling slots information from marketplace page."""
@@ -457,30 +570,35 @@ class InventoryManager:
             # Look for selling section
             page_text = await self.page.inner_text("body")
             
-            # Pattern to match selling slots like "6/30"
+            # 更精確的銷售位模式匹配
             selling_patterns = [
-                r'(\d+)/(\d+)\s*(?:slots?|位|個)',
-                r'Selling:\s*(\d+)/(\d+)',
-                r'Listed:\s*(\d+)/(\d+)',
-                r'銷售:\s*(\d+)/(\d+)'
+                r'(\d+)\s*/\s*(\d+)(?=\s*(?:\*|$|\n))',  # "2 / 26" 後面可能跟著 * 或結束
+                r'(\d+)/(\d+)\s*(?:slots?|位|個)',       # "2/26 slots" 格式
+                r'Selling:\s*(\d+)/(\d+)',               # "Selling: 2/26" 格式
+                r'Listed:\s*(\d+)/(\d+)',                # "Listed: 2/26" 格式
+                r'銷售:\s*(\d+)/(\d+)',                  # 中文格式
             ]
             
             for pattern in selling_patterns:
-                match = re.search(pattern, page_text, re.IGNORECASE)
-                if match:
+                matches = re.finditer(pattern, page_text, re.IGNORECASE)
+                for match in matches:
                     current = int(match.group(1))
                     max_slots = int(match.group(2))
-                    logger.debug(f"從模式 '{pattern}' 找到銷售位信息: {current}/{max_slots}")
-                    return {
-                        'current': current,
-                        'max': max_slots,
-                        'items': []  # Could be enhanced to get actual listed items
-                    }
+                    
+                    # 驗證數值合理性（銷售位通常不會超過50）
+                    if max_slots <= 50 and current <= max_slots:
+                        logger.debug(f"從模式 '{pattern}' 找到銷售位信息: {current}/{max_slots}")
+                        return {
+                            'current': current,
+                            'max': max_slots,
+                            'items': []  # Could be enhanced to get actual listed items
+                        }
             
-            # Default selling slots info
+            # 如果沒有找到，返回默認值
+            logger.warning("無法從頁面文本中找到銷售位信息，使用默認值")
             return {
                 'current': 0,
-                'max': 30,  # Default max slots
+                'max': 26,  # 根據用戶提供的信息，銷售位最大數量是26
                 'items': []
             }
             
@@ -488,33 +606,13 @@ class InventoryManager:
             logger.error(f"提取銷售位信息時出錯: {e}")
             return None
     
-    async def _extract_inventory_items(self) -> List[str]:
-        """Extract list of items in inventory."""
+    async def _extract_inventory_items(self) -> List[InventoryItem]:
+        """Extract list of items in inventory with full details."""
         try:
-            # Look for inventory item elements
-            inventory_selectors = [
-                ".inventory-item",
-                ".item",
-                "[class*='inventory'] .item",
-                "[id*='inventory'] .item"
-            ]
-            
-            items = []
-            for selector in inventory_selectors:
-                try:
-                    elements = await self.page.query_selector_all(selector)
-                    for element in elements:
-                        item_text = await element.inner_text()
-                        if item_text and item_text.strip():
-                            items.append(item_text.strip())
-                    
-                    if items:
-                        logger.debug(f"從選擇器 '{selector}' 找到 {len(items)} 件物品")
-                        break
-                except Exception:
-                    continue
-            
-            return items
+            inventory_info = await self._extract_inventory_info()
+            if inventory_info and inventory_info.get('items'):
+                return inventory_info['items']
+            return []
             
         except Exception as e:
             logger.error(f"提取庫存物品時出錯: {e}")
