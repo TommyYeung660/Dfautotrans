@@ -18,7 +18,7 @@ class MarketSearchConfig:
     max_price_per_unit: List[float]  # 每種物品的最大購買價格（與target_items對應）
     max_items_per_search: int = 75
     search_timeout_seconds: int = 30
-    
+
     @property
     def primary_search_terms(self) -> List[str]:
         """返回目標物品清單作為搜索詞 - 向後兼容"""
@@ -229,7 +229,7 @@ class TradingConfigManager:
         if not 0 < self.config.buying.min_profit_margin < 1:
             raise ValueError(f"min_profit_margin 必須在 0-1 之間，當前值: {self.config.buying.min_profit_margin}")
             
-
+            
         # 驗證延遲範圍
         delay_range = self.config.risk_management.random_delay_range
         if delay_range[0] >= delay_range[1]:

@@ -95,25 +95,32 @@ class LoginHandler:
                     if await self.cookie_manager.load_session(self.browser_manager.context):
                         logger.info("2️⃣ 會話加載成功，驗證登錄狀態...")
                         
-                        # Navigate to a protected page to test session
-                        await self.browser_manager.page.goto(
-                            "https://fairview.deadfrontier.com/onlinezombiemmo/index.php",
-                            wait_until="domcontentloaded"
-                        )
-                        
-                        # Wait for page to load and validate session
-                        await asyncio.sleep(3)
-                        
-                        if await self.cookie_manager.validate_session(self.browser_manager.page):
-                            logger.info("✅ 會話驗證成功，無需重新登錄！")
-                            self.browser_manager.is_logged_in = True
-                            self.page_navigator.clear_cache()
-                            return True
-                        else:
-                            logger.info("❌ 會話驗證失敗，清除過期會話")
+                        try:
+                            # Navigate to a protected page to test session
+                            await self.browser_manager.page.goto(
+                                "https://fairview.deadfrontier.com/onlinezombiemmo/index.php",
+                                wait_until="domcontentloaded",
+                                timeout=15000  # 增加超時時間
+                            )
+                            
+                            # Wait for page to load and validate session
+                            await asyncio.sleep(3)
+                            
+                            if await self.cookie_manager.validate_session(self.browser_manager.page):
+                                logger.info("✅ 會話驗證成功，無需重新登錄！")
+                                self.browser_manager.is_logged_in = True
+                                self.page_navigator.clear_cache()
+                                return True
+                            else:
+                                logger.info("❌ 會話驗證失敗，清除過期會話")
+                                await self.cookie_manager.clear_session()
+                        except Exception as e:
+                            logger.warning(f"⚠️ 會話驗證過程中出錯: {e}")
+                            logger.info("清除可能已損壞的會話")
                             await self.cookie_manager.clear_session()
                     else:
                         logger.info("❌ 會話加載失敗")
+                        await self.cookie_manager.clear_session()
                 else:
                     logger.info("❌ 保存的會話已過期")
                     await self.cookie_manager.clear_session()

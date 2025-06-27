@@ -663,15 +663,22 @@ class BrowserManager:
         try:
             # Wait for page to be in ready state
             await self.page.wait_for_load_state("domcontentloaded", timeout=timeout)
-            await self.page.wait_for_load_state("networkidle", timeout=timeout)
             
-            # Check and close any fancybox overlays
-            await self.close_fancybox_overlay()
+            # 快速檢查並關閉 fancybox overlay（不等待 networkidle）
+            overlay_closed = await self.close_fancybox_overlay()
+            if overlay_closed:
+                logger.debug("在頁面載入期間關閉了 fancybox overlay")
+            
+            # 只有在沒有 overlay 的情況下才等待 networkidle
+            try:
+                await self.page.wait_for_load_state("networkidle", timeout=min(5000, timeout // 2))
+            except Exception as e:
+                logger.debug(f"Network idle timeout (這是正常的): {e}")
             
             # Verify page is responsive
             ready_state = await self.page.evaluate("() => document.readyState")
             if ready_state != "complete":
-                logger.warning(f"Page not fully ready: {ready_state}")
+                logger.debug(f"Page ready state: {ready_state}")
             
             self._last_page_load_time = asyncio.get_event_loop().time()
             return True
@@ -690,113 +697,166 @@ class BrowserManager:
             return False
             
         try:
-            # Check if fancybox overlay is present
-            fancybox_content = await self.page.query_selector("#fancybox-content")
-            if fancybox_content:
-                logger.debug("🔍 檢測到 fancybox overlay，嘗試關閉...")
-                
-                # Method 1: Try to find and click the close button
-                close_selectors = [
-                    "#fancybox-close",
-                    ".fancybox-close",
-                    "#fancybox-overlay .close",
-                    "[title*='close']",
-                    "[alt*='close']",
-                    "a[title='Close']"
-                ]
-                
-                for selector in close_selectors:
-                    try:
-                        close_button = await self.page.query_selector(selector)
-                        if close_button:
-                            logger.debug(f"找到關閉按鈕: {selector}")
-                            await close_button.click()
-                            await asyncio.sleep(1)
-                            
-                            # Check if overlay is gone
-                            fancybox_after = await self.page.query_selector("#fancybox-content")
-                            if not fancybox_after:
-                                logger.debug("✅ 成功通過關閉按鈕關閉 fancybox overlay")
-                                return True
-                    except:
-                        continue
-                
-                # Method 2: Click outside the fancybox content area
-                try:
-                    # Get the overlay element (usually covers the whole page)
-                    overlay = await self.page.query_selector("#fancybox-overlay")
-                    if overlay:
-                        logger.debug("嘗試點擊 fancybox overlay 外部區域...")
-                        # Get overlay bounding box and click at edge
-                        box = await overlay.bounding_box()
-                        if box:
-                            # Click at top-left corner of overlay (outside content)
-                            await self.page.mouse.click(box['x'] + 10, box['y'] + 10)
-                            await asyncio.sleep(1)
-                            
-                            # Check if overlay is gone
-                            fancybox_after = await self.page.query_selector("#fancybox-content")
-                            if not fancybox_after:
-                                logger.debug("✅ 成功通過點擊外部區域關閉 fancybox overlay")
-                                return True
-                except:
-                    pass
-                
-                # Method 3: Press Escape key
-                try:
-                    logger.debug("嘗試按 Escape 鍵關閉 fancybox overlay...")
-                    await self.page.keyboard.press("Escape")
-                    await asyncio.sleep(1)
-                    
-                    # Check if overlay is gone
-                    fancybox_after = await self.page.query_selector("#fancybox-content")
-                    if not fancybox_after:
-                        logger.debug("✅ 成功通過 Escape 鍵關閉 fancybox overlay")
-                        return True
-                except:
-                    pass
-                
-                # Method 4: Use JavaScript to force close
-                try:
-                    logger.debug("嘗試使用 JavaScript 強制關閉 fancybox overlay...")
-                    await self.page.evaluate("""
-                        // Try various methods to close fancybox
-                        if (typeof $.fancybox !== 'undefined') {
-                            $.fancybox.close();
-                        }
-                        
-                        // Remove elements directly
-                        const fancyboxContent = document.getElementById('fancybox-content');
-                        if (fancyboxContent) {
-                            const parent = fancyboxContent.parentElement;
-                            if (parent) parent.remove();
-                        }
-                        
-                        const fancyboxOverlay = document.getElementById('fancybox-overlay');
-                        if (fancyboxOverlay) {
-                            fancyboxOverlay.remove();
-                        }
-                        
-                        // Also try to remove any fancybox-related elements
-                        const fancyboxElements = document.querySelectorAll('[id*="fancybox"], [class*="fancybox"]');
-                        fancyboxElements.forEach(el => el.remove());
-                    """)
-                    await asyncio.sleep(1)
-                    
-                    # Check if overlay is gone
-                    fancybox_after = await self.page.query_selector("#fancybox-content")
-                    if not fancybox_after:
-                        logger.debug("✅ 成功通過 JavaScript 關閉 fancybox overlay")
-                        return True
-                except:
-                    pass
-                
-                logger.warning("⚠️ 無法關閉 fancybox overlay，可能會影響頁面操作")
-                return False
+            # 首先快速檢查是否有 fancybox overlay
+            fancybox_selectors = [
+                "#fancybox-content",
+                "#fancybox-overlay", 
+                ".fancybox-overlay",
+                ".fancybox-content"
+            ]
             
-            # No fancybox found
+            fancybox_element = None
+            for selector in fancybox_selectors:
+                fancybox_element = await self.page.query_selector(selector)
+                if fancybox_element:
+                    break
+            
+            if not fancybox_element:
+                # 沒有 fancybox，直接返回
+                return False
+                
+            logger.debug("🔍 檢測到 fancybox overlay，嘗試快速關閉...")
+            
+            # 優化的關閉策略：先嘗試最快的方法
+            close_methods = [
+                self._try_javascript_close,
+                self._try_escape_key,
+                self._try_close_button,
+                self._try_click_outside
+            ]
+            
+            for method in close_methods:
+                try:
+                    if await method():
+                        logger.debug("✅ 成功關閉 fancybox overlay")
+                        return True
+                except Exception as e:
+                    logger.debug(f"關閉方法失敗: {e}")
+                    continue
+            
+            logger.warning("⚠️ 無法關閉 fancybox overlay，可能會影響頁面操作")
             return False
             
         except Exception as e:
             logger.debug(f"檢查 fancybox overlay 時出錯: {e}")
-            return False 
+            return False
+
+    async def _try_javascript_close(self) -> bool:
+        """嘗試使用 JavaScript 強制關閉 fancybox."""
+        try:
+            # 使用更全面的 JavaScript 關閉邏輯
+            success = await self.page.evaluate("""
+                () => {
+                    // Method 1: Try jQuery fancybox close
+                    if (typeof $ !== 'undefined' && $.fancybox) {
+                        try {
+                            $.fancybox.close();
+                            return true;
+                        } catch (e) {}
+                    }
+                    
+                    // Method 2: Try direct fancybox API
+                    if (typeof parent !== 'undefined' && parent.$.fancybox) {
+                        try {
+                            parent.$.fancybox.close();
+                            return true;
+                        } catch (e) {}
+                    }
+                    
+                    // Method 3: Remove elements directly
+                    let removed = false;
+                    const elementsToRemove = [
+                        '#fancybox-overlay',
+                        '#fancybox-content',
+                        '#fancybox-wrap',
+                        '.fancybox-overlay',
+                        '.fancybox-content',
+                        '.fancybox-wrap'
+                    ];
+                    
+                    elementsToRemove.forEach(selector => {
+                        const elements = document.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            el.remove();
+                            removed = true;
+                        });
+                    });
+                    
+                    return removed;
+                }
+            """)
+            
+            if success:
+                await asyncio.sleep(0.2)  # 短暫等待
+                # 驗證是否真的關閉了
+                fancybox_check = await self.page.query_selector("#fancybox-content, #fancybox-overlay")
+                return fancybox_check is None
+                
+        except Exception:
+            pass
+        return False
+
+    async def _try_escape_key(self) -> bool:
+        """嘗試按 Escape 鍵關閉."""
+        try:
+            await self.page.keyboard.press("Escape")
+            await asyncio.sleep(0.2)
+            
+            # 檢查是否關閉
+            fancybox_check = await self.page.query_selector("#fancybox-content, #fancybox-overlay")
+            return fancybox_check is None
+        except Exception:
+            return False
+
+    async def _try_close_button(self) -> bool:
+        """嘗試點擊關閉按鈕."""
+        try:
+            close_selectors = [
+                "#fancybox-close",
+                ".fancybox-close", 
+                "#fancybox-overlay .close",
+                "[title*='close' i]",
+                "[alt*='close' i]",
+                "a[title*='Close' i]",
+                "button[title*='close' i]",
+                ".close-btn",
+                ".close-button"
+            ]
+            
+            for selector in close_selectors:
+                close_button = await self.page.query_selector(selector)
+                if close_button:
+                    # 檢查按鈕是否可見和可點擊
+                    is_visible = await close_button.is_visible()
+                    if is_visible:
+                        await close_button.click(timeout=1000)
+                        await asyncio.sleep(0.2)
+                        
+                        # 檢查是否關閉
+                        fancybox_check = await self.page.query_selector("#fancybox-content, #fancybox-overlay")
+                        if fancybox_check is None:
+                            return True
+            
+        except Exception:
+            pass
+        return False
+
+    async def _try_click_outside(self) -> bool:
+        """嘗試點擊 overlay 外部區域."""
+        try:
+            overlay = await self.page.query_selector("#fancybox-overlay")
+            if overlay:
+                # 獲取 overlay 的邊界框
+                box = await overlay.bounding_box()
+                if box:
+                    # 點擊左上角（通常是安全的外部區域）
+                    await self.page.mouse.click(box['x'] + 5, box['y'] + 5, timeout=1000)
+                    await asyncio.sleep(0.2)
+                    
+                    # 檢查是否關閉
+                    fancybox_check = await self.page.query_selector("#fancybox-content, #fancybox-overlay")
+                    return fancybox_check is None
+                    
+        except Exception:
+            pass
+        return False 

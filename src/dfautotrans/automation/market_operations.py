@@ -1,6 +1,7 @@
 """Market operations module for Dead Frontier Auto Trading System."""
 
 import asyncio
+import logging
 import re
 import random
 from typing import Optional, List, Dict, Any, Tuple
@@ -136,14 +137,14 @@ class MarketOperations:
             logger.error(f"❌ 掃描市場物品失敗: {e}")
             return []
 
-    async def execute_purchase(self, item: MarketItemData, max_retries: int = 3) -> bool:
+    async def execute_purchase(self, item: MarketItemData, max_retries: int = 3) -> Dict[str, Any]:
         """執行購買操作（優化版）"""
         try:
             logger.info(f"🛒 嘗試購買: {item.item_name} - 價格: ${item.price} - 數量: {item.quantity}")
             
             # 確保在購買標籤頁（不會重複導航）
             if not await self._ensure_marketplace_session('buy'):
-                return False
+                return {'success': False, 'reason': '無法確保在市場頁面'}
             
             # 其餘購買邏輯保持不變...
             for attempt in range(max_retries):
@@ -151,31 +152,45 @@ class MarketOperations:
                     await asyncio.sleep(1)
                     await self.browser_manager.close_fancybox_overlay()
                     
-                    if await self._find_and_click_buy_button(item):
+                    purchase_info = await self._find_and_click_buy_button(item)
+                    if purchase_info and purchase_info.get('success'):
                         if await self._handle_purchase_confirmation():
                             logger.info(f"✅ 購買成功: {item.item_name}")
-                            return True
-                    
-                    if attempt < max_retries - 1:
-                        logger.warning(f"⚠️ 購買嘗試 {attempt + 1} 失敗，重試...")
-                        await asyncio.sleep(2)
+                            return purchase_info
+                        else:
+                            return {'success': False, 'reason': '購買確認失敗'}
+                    else:
+                        reason = purchase_info.get('reason', '未知原因') if purchase_info else '找不到購買按鈕'
+                        if attempt < max_retries - 1:
+                            logger.warning(f"⚠️ 購買嘗試 {attempt + 1} 失敗: {reason}，重試...")
+                            await asyncio.sleep(2)
+                        else:
+                            return {'success': False, 'reason': reason}
                         
                 except Exception as e:
                     logger.warning(f"⚠️ 購買嘗試 {attempt + 1} 出錯: {e}")
                     if attempt < max_retries - 1:
                         await asyncio.sleep(2)
+                    else:
+                        return {'success': False, 'reason': str(e)}
             
             logger.error(f"❌ 購買失敗: {item.item_name}")
-            return False
+            return {'success': False, 'reason': '達到最大重試次數'}
             
         except Exception as e:
             logger.error(f"❌ 購買操作失敗: {e}")
-            return False
+            return {'success': False, 'reason': f'購買操作失敗: {e}'}
 
-    async def list_item_for_sale(self, item_name: str, price: float, quantity: int = 1) -> bool:
-        """上架物品銷售（優化版）"""
+    async def list_item_for_sale(self, item_name: str, unit_price: float, quantity: int = 1) -> bool:
+        """上架物品銷售（優化版）
+        
+        Args:
+            item_name: 物品名稱
+            unit_price: 單價
+            quantity: 數量（向後兼容，實際數量從庫存獲取）
+        """
         try:
-            logger.info(f"📝 準備上架銷售: {item_name} (總價: ${price})")
+            logger.info(f"📝 準備上架銷售: {item_name} (單價: ${unit_price})")
             
             # 確保在銷售標籤頁（不會重複導航）
             if not await self._ensure_marketplace_session('sell'):
@@ -184,7 +199,7 @@ class MarketOperations:
             await asyncio.sleep(1)  # 減少等待時間
             await self.browser_manager.close_fancybox_overlay()
             
-            # 其餘上架邏輯保持不變...
+            # 查找庫存物品
             item_info = await self._find_inventory_item(item_name)
             if not item_info:
                 logger.error(f"❌ 在庫存中找不到物品: {item_name}")
@@ -195,16 +210,13 @@ class MarketOperations:
             
             logger.debug(f"✅ 找到庫存物品: {item_name} (數量: {actual_quantity})")
             
-            # 價格計算邏輯保持不變
-            if price < 100 and actual_quantity > 1:
-                logger.warning(f"⚠️ 檢測到可能的單價輸入 (${price})，重新計算總價...")
-                total_price = price * actual_quantity
-                logger.info(f"💰 重新計算: ${price} × {actual_quantity} = ${total_price}")
-                price = total_price
+            # 計算總價（單價 × 實際數量）
+            total_price = unit_price * actual_quantity
+            logger.debug(f"💰 價格計算: {item_name} - 單價${unit_price:.2f} × 數量{actual_quantity} = 總價${total_price:.2f}")
             
-            # 執行上架操作
-            if await self._execute_listing_process(item_element, price):
-                logger.info(f"✅ 成功上架銷售: {item_name} (價格: ${price})")
+            # 執行上架操作（使用總價）
+            if await self._execute_listing_process(item_element, total_price):
+                logger.info(f"✅ 成功上架銷售: {item_name} (單價${unit_price:.2f}, 總價${total_price:.2f})")
                 return True
             else:
                 logger.error(f"❌ 上架失敗: {item_name}")
@@ -249,9 +261,16 @@ class MarketOperations:
                         results.append(False)
                         continue
                     
-                    # 執行上架
-                    if await self._execute_listing_process(item_info['element'], sell_order.selling_price):
-                        logger.info(f"✅ 第 {i} 個物品上架成功: {sell_order.item.item_name}")
+                    # 計算總價（單價 × 數量）
+                    unit_price = sell_order.selling_price
+                    quantity = item_info.get('quantity', 1)
+                    total_price = unit_price * quantity
+                    
+                    logger.debug(f"💰 價格計算: {sell_order.item.item_name} - 單價${unit_price:.2f} × 數量{quantity} = 總價${total_price:.2f}")
+                    
+                    # 執行上架（使用總價）
+                    if await self._execute_listing_process(item_info['element'], total_price):
+                        logger.info(f"✅ 第 {i} 個物品上架成功: {sell_order.item.item_name} (單價${unit_price:.2f}, 總價${total_price:.2f})")
                         results.append(True)
                         successful_count += 1
                     else:
@@ -641,8 +660,8 @@ class MarketOperations:
             logger.warning(f"提取第{row_index+1}行物品信息時出錯: {e}")
             return None
     
-    async def _find_and_click_buy_button(self, item: MarketItemData) -> bool:
-        """找到指定物品並點擊購買按鈕。"""
+    async def _find_and_click_buy_button(self, item: MarketItemData) -> Dict[str, Any]:
+        """查找並點擊購買按鈕。直接購買排第一的物品（最低價）。"""
         try:
             # 首先關閉可能阻擋的信息框
             await self._close_info_box()
@@ -650,42 +669,183 @@ class MarketOperations:
             # Find all market rows (.fakeItem from marketplace_helper.js)
             rows = await self.page.query_selector_all(".fakeItem")
             
-            for row in rows:
-                # Check if this row matches our item using data attributes
-                if await self._is_matching_item_row(row, item):
-                    # Look for buy button with data-action="buyItem" (from marketplace_helper.js)
-                    buy_button = await row.query_selector("[data-action='buyItem']")
-                    
-                    if buy_button:
-                        logger.debug(f"找到購買按鈕，準備點擊...")
-                        
-                        # 再次確保沒有阻擋元素
-                        await self._close_info_box()
-                        
-                        # 使用更安全的點擊方式
-                        try:
-                            await buy_button.click(force=True)
-                        except Exception as click_error:
-                            logger.debug(f"強制點擊失敗，嘗試JavaScript點擊: {click_error}")
-                            # 備用方案：使用JavaScript點擊
-                            await self.page.evaluate("(element) => element.click()", buy_button)
-                        
-                        await asyncio.sleep(1)
-                        return True
-                    else:
-                        logger.warning(f"找到匹配物品但沒有購買按鈕")
-                        return False
+            if not rows:
+                logger.warning("沒有找到任何市場物品行")
+                return False
             
-            logger.warning(f"找不到匹配的物品: {item.item_name}")
-            return False
+            # 檢查第一個物品是否是我們要購買的物品類型
+            first_row = rows[0]
+            
+            # 驗證第一個物品的名稱是否匹配
+            try:
+                item_name_element = await first_row.query_selector(".itemName")
+                if item_name_element:
+                    first_item_name = (await item_name_element.inner_text()).strip()
+                    if first_item_name != item.item_name:
+                        logger.warning(f"第一個物品名稱不匹配: {first_item_name} vs {item.item_name}")
+                        return False
+                else:
+                    logger.warning("無法獲取第一個物品的名稱")
+                    return False
+            except Exception as e:
+                logger.warning(f"驗證第一個物品名稱時出錯: {e}")
+                return False
+            
+            # 直接購買排第一的物品（最低價）
+            buy_button = await first_row.query_selector("[data-action='buyItem']")
+            
+            if buy_button:
+                # 檢查購買按鈕是否被禁用
+                is_disabled = await buy_button.is_disabled()
+                
+                if is_disabled:
+                    logger.warning(f"第一個物品的購買按鈕被禁用，檢查原因...")
+                    
+                    # 1. 首先檢查庫存空間
+                    try:
+                        from ..automation.inventory_manager import InventoryManager
+                        inventory_manager = InventoryManager(self.settings, self.browser_manager, self.page_navigator)
+                        inventory_status = await inventory_manager.get_inventory_status()
+                        
+                        inventory_used = inventory_status.get('used', 0)
+                        inventory_total = inventory_status.get('total', 26)
+                        inventory_available = inventory_total - inventory_used
+                        
+                        logger.debug(f"庫存狀態檢查: {inventory_used}/{inventory_total} (可用: {inventory_available})")
+                        
+                        if inventory_available <= 0:
+                            logger.warning(f"庫存空間不足: {inventory_used}/{inventory_total}，需要立即進行空間管理")
+                            return {
+                                'success': False, 
+                                'reason': 'inventory_full',
+                                'requires_space_management': True,
+                                'inventory_used': inventory_used,
+                                'inventory_total': inventory_total
+                            }
+                    except Exception as e:
+                        logger.debug(f"檢查庫存空間時出錯: {e}")
+                    
+                    # 2. 檢查當前資金
+                    current_cash = await self.page_navigator.get_current_cash()
+                    
+                    # 3. 獲取物品價格
+                    try:
+                        price_element = await first_row.query_selector(".salePrice")
+                        if price_element:
+                            price_text = await price_element.inner_text()
+                            item_price = self._extract_price_from_text(price_text)
+                            
+                            if current_cash < item_price:
+                                logger.info(f"資金不足：現金 ${current_cash} < 物品價格 ${item_price}，嘗試取錢...")
+                                
+                                # 執行取錢流程
+                                from ..automation.bank_operations import BankOperations
+                                bank_ops = BankOperations(self.settings, self.browser_manager, self.page_navigator)
+                                withdrawal_success = await bank_ops.withdraw_all_funds()
+                                
+                                if withdrawal_success:
+                                    logger.info("取錢成功，重新檢查購買按鈕...")
+                                    await asyncio.sleep(2)  # 等待頁面更新
+                                    
+                                    # 重新檢查按鈕狀態
+                                    is_disabled = await buy_button.is_disabled()
+                                    if is_disabled:
+                                        logger.warning("取錢後購買按鈕仍被禁用，可能是自己的物品或庫存已滿")
+                                        return {'success': False, 'reason': '取錢後購買按鈕仍被禁用，可能是自己的物品或庫存已滿'}
+                                else:
+                                    logger.warning("取錢失敗，無法購買")
+                                    return {'success': False, 'reason': '取錢失敗，無法購買'}
+                            else:
+                                logger.info(f"資金充足：現金 ${current_cash} >= 物品價格 ${item_price}，但按鈕被禁用，可能是自己的物品")
+                                return {'success': False, 'reason': '物品被禁用，可能是自己的物品'}
+                    except Exception as e:
+                        logger.warning(f"檢查物品價格時出錯: {e}")
+                        return {'success': False, 'reason': f'檢查物品價格時出錯: {e}'}
+                
+                # 如果按鈕可用，執行購買
+                logger.debug(f"找到第一個物品的購買按鈕，準備購買最低價物品...")
+                
+                # 記錄實際購買的物品信息
+                try:
+                    seller_element = await first_row.query_selector(".seller")
+                    price_element = await first_row.query_selector(".salePrice")
+                    quantity_element = await first_row.query_selector(".saleQuantity")
+                    
+                    if seller_element and price_element:
+                        actual_seller = (await seller_element.inner_text()).strip()
+                        actual_price_text = await price_element.inner_text()
+                        actual_total_price = self._extract_price_from_text(actual_price_text)
+                        
+                        # 嘗試獲取數量信息
+                        actual_quantity = 1
+                        if quantity_element:
+                            quantity_text = await quantity_element.inner_text()
+                            actual_quantity = self._extract_number_from_text(quantity_text) or 1
+                        else:
+                            # 從 data 屬性獲取數量
+                            data_quantity = await first_row.get_attribute("data-quantity")
+                            if data_quantity:
+                                actual_quantity = int(data_quantity)
+                        
+                        # 計算實際單價
+                        actual_unit_price = actual_total_price / actual_quantity if actual_quantity > 0 else actual_total_price
+                        
+                        logger.info(f"實際購買: {item.item_name} - 賣家: {actual_seller} - 數量: {actual_quantity} - 單價: ${actual_unit_price:.2f} - 總價: ${actual_total_price:.2f}")
+                        logger.info(f"預期購買: {item.item_name} - 單價: ${item.price:.2f} - 實際單價: ${actual_unit_price:.2f} - 價格差異: {abs(item.price - actual_unit_price):.2f}")
+                        
+                        # 保存購買信息
+                        purchase_info = {
+                            'success': True,
+                            'item_name': item.item_name,
+                            'seller': actual_seller,
+                            'quantity': actual_quantity,
+                            'unit_price': actual_unit_price,
+                            'total_price': actual_total_price,
+                            'expected_unit_price': item.price,
+                            'price_difference': abs(item.price - actual_unit_price)
+                        }
+                        
+                except Exception as e:
+                    logger.debug(f"記錄實際購買信息時出錯: {e}")
+                    # 使用預期值作為備用
+                    purchase_info = {
+                        'success': True,
+                        'item_name': item.item_name,
+                        'seller': item.seller,
+                        'quantity': item.quantity,
+                        'unit_price': item.price,
+                        'total_price': item.price * item.quantity,
+                        'expected_unit_price': item.price,
+                        'price_difference': 0.0
+                    }
+                
+                # 再次確保沒有阻擋元素
+                await self._close_info_box()
+                
+                # 使用更安全的點擊方式
+                try:
+                    await buy_button.click(force=True)
+                except Exception as click_error:
+                    logger.debug(f"強制點擊失敗，嘗試JavaScript點擊: {click_error}")
+                    # 備用方案：使用JavaScript點擊
+                    await self.page.evaluate("(element) => element.click()", buy_button)
+                
+                await asyncio.sleep(1)
+                return purchase_info
+            else:
+                logger.warning(f"第一個物品沒有購買按鈕")
+                return {'success': False, 'reason': '第一個物品沒有購買按鈕'}
             
         except Exception as e:
             logger.error(f"查找並點擊購買按鈕時出錯: {e}")
-            return False
+            return {'success': False, 'reason': f'查找並點擊購買按鈕時出錯: {e}'}
     
     async def _close_info_box(self):
         """關閉可能阻擋點擊的信息框"""
         try:
+            # 首先快速關閉 fancybox overlay
+            await self._quick_close_fancybox()
+            
             # 嘗試隱藏 infoBox
             info_box = await self.page.query_selector("#infoBox")
             if info_box:
@@ -695,7 +855,7 @@ class MarketOperations:
                     logger.debug("發現可見的infoBox，嘗試隱藏...")
                     # 使用JavaScript強制隱藏
                     await self.page.evaluate("document.getElementById('infoBox').style.visibility = 'hidden'")
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.1)
             
             # 也檢查其他可能的阻擋元素
             blocking_selectors = ["#textAddon", ".tooltip", ".popup"]
@@ -709,6 +869,81 @@ class MarketOperations:
         except Exception as e:
             logger.debug(f"關閉信息框時出錯: {e}")
             # 不拋出異常，因為這只是輔助功能
+
+    async def _quick_close_fancybox(self) -> bool:
+        """超快速關閉 fancybox overlay（專為市場操作優化）"""
+        try:
+            # 使用最快的 JavaScript 方法一次性檢查和關閉
+            success = await self.page.evaluate("""
+                () => {
+                    // 檢查是否有 fancybox 元素
+                    const fancyboxElements = document.querySelectorAll('#fancybox-overlay, #fancybox-content, .fancybox-overlay, .fancybox-content');
+                    if (fancyboxElements.length === 0) {
+                        return false; // 沒有 fancybox
+                    }
+                    
+                    // 立即嘗試多種關閉方法
+                    try {
+                        // Method 1: jQuery fancybox API
+                        if (typeof $ !== 'undefined' && $.fancybox && $.fancybox.close) {
+                            $.fancybox.close();
+                        }
+                        
+                        // Method 2: 父窗口的 fancybox API
+                        if (typeof parent !== 'undefined' && parent.$ && parent.$.fancybox) {
+                            parent.$.fancybox.close();
+                        }
+                        
+                        // Method 3: 直接移除所有 fancybox 相關元素
+                        const allFancyboxSelectors = [
+                            '#fancybox-overlay', '#fancybox-content', '#fancybox-wrap',
+                            '.fancybox-overlay', '.fancybox-content', '.fancybox-wrap',
+                            '[id*="fancybox"]', '[class*="fancybox"]'
+                        ];
+                        
+                        allFancyboxSelectors.forEach(selector => {
+                            document.querySelectorAll(selector).forEach(el => {
+                                try {
+                                    el.remove();
+                                } catch (e) {
+                                    el.style.display = 'none';
+                                    el.style.visibility = 'hidden';
+                                }
+                            });
+                        });
+                        
+                        // Method 4: 觸發 Escape 事件
+                        const escapeEvent = new KeyboardEvent('keydown', {
+                            key: 'Escape',
+                            keyCode: 27,
+                            which: 27,
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        document.dispatchEvent(escapeEvent);
+                        
+                        return true;
+                    } catch (e) {
+                        // 如果出錯，強制移除所有可能的 overlay 元素
+                        try {
+                            document.querySelectorAll('div[style*="position: fixed"], div[style*="position: absolute"]').forEach(el => {
+                                if (el.style.zIndex > 1000 || el.id.includes('fancy') || el.className.includes('fancy')) {
+                                    el.remove();
+                                }
+                            });
+                        } catch (e2) {}
+                        return true;
+                    }
+                }
+            """)
+            
+            if success:
+                await asyncio.sleep(0.05)  # 極短等待，只為確保DOM更新
+                return True
+                
+        except Exception:
+            pass
+        return False
     
     async def _is_matching_item_row(self, row, target_item: MarketItemData) -> bool:
         """檢查市場物品行是否匹配目標物品。"""

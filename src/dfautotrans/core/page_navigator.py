@@ -320,6 +320,10 @@ class PageNavigator:
                 return cash
             
             logger.warning("Could not find cash amount on page")
+            # 如果在遊戲頁面但找不到現金信息，可能是頁面還沒完全加載
+            current_url = self.page.url
+            if "fairview.deadfrontier.com" in current_url:
+                logger.debug("On game page but no cash found - page may still be loading")
             return None
             
         except Exception as e:

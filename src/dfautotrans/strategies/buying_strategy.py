@@ -188,7 +188,8 @@ class BuyingStrategy:
         """
         基於 trading_config.json 配置估算物品的合理銷售價格
         
-        邏輯：使用配置的max_price_per_unit作為買入參考，在此基礎上加價估算售價
+        邏輯：使用配置的max_price_per_unit作為市場可接受的最高價格，
+        在實際買入價基礎上加價估算售價
         """
         
         # 獲取物品的最大購買價格作為參考
@@ -199,18 +200,23 @@ class BuyingStrategy:
         # 使用與 selling_strategy.py 一致的邏輯
         markup_percentage = self.trading_config.selling.markup_percentage
         
-        # 假設平均買入價格為 max_buy_price 的 85%
-        estimated_buy_price = max_buy_price * 0.85
+        # 修正邏輯：基於實際買入價格計算售價
+        # 在實際買入價基礎上加價
+        estimated_sell_price = item.price * (1 + markup_percentage)
         
-        # 在買入價基礎上加價
-        estimated_sell_price = estimated_buy_price * (1 + markup_percentage)
+        # 確保賣出價格合理（不要超過市場可接受的最高價格）
+        # 使用 max_buy_price 作為市場可接受的上限
+        if estimated_sell_price > max_buy_price:
+            # 如果加價後超過市場接受價格，則使用市場最高價
+            estimated_sell_price = max_buy_price
         
-        # 確保賣出價格合理（不要過高導致無法銷售）
-        # 最高不超過 max_buy_price 的 130%
-        max_reasonable_price = max_buy_price * 1.30
-        estimated_sell_price = min(estimated_sell_price, max_reasonable_price)
+        # 進一步安全檢查：確保至少有最小利潤率
+        min_required_sell_price = item.price * (1 + self.trading_config.buying.min_profit_margin)
+        if estimated_sell_price < min_required_sell_price:
+            # 如果估算售價無法達到最小利潤率，則返回能達到最小利潤率的價格
+            estimated_sell_price = min_required_sell_price
         
-        logger.debug(f"估算售價: {item.item_name} - 買入參考${max_buy_price} -> 預估售價${estimated_sell_price:.2f}")
+        logger.debug(f"估算售價: {item.item_name} - 買入${item.price:.2f} -> 預估售價${estimated_sell_price:.2f} (市場上限${max_buy_price})")
         return estimated_sell_price
 
     def _calculate_priority_score(self, item: MarketItemData, profit_potential: float) -> float:
