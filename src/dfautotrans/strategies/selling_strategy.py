@@ -8,6 +8,7 @@ import asyncio
 import logging
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
+import pytz
 
 from ..data.models import (
     InventoryItemData, SellOrder, TradingConfiguration, 
@@ -44,6 +45,33 @@ class SellingStrategy:
         self.sell_history: List[SellOrder] = []  # 銷售歷史
         
         logger.info("銷售策略初始化完成")
+        
+    def _is_us_peak_hours(self) -> bool:
+        """檢查當前是否為美國高峰時段（美國東部時間19:00-23:59）"""
+        if not self.trading_config.selling.peak_hours_enabled:
+            return False
+            
+        try:
+            # 獲取美國東部時間
+            us_eastern = pytz.timezone('US/Eastern')
+            us_time = datetime.now(us_eastern)
+            current_hour = us_time.hour
+            
+            start_hour = self.trading_config.selling.peak_hours_start
+            end_hour = self.trading_config.selling.peak_hours_end
+            
+            # 處理跨日情況
+            if start_hour <= end_hour:
+                is_peak = start_hour <= current_hour <= end_hour
+            else:
+                is_peak = current_hour >= start_hour or current_hour <= end_hour
+            
+            logger.debug(f"美國東部時間: {us_time.strftime('%H:%M')}, 高峰時段: {is_peak}")
+            return is_peak
+            
+        except Exception as e:
+            logger.warning(f"檢查高峰時段時出錯: {e}")
+            return False
 
     async def plan_selling_strategy(
         self, 
@@ -188,9 +216,17 @@ class SellingStrategy:
             # 在買入價基礎上加價
             selling_price = estimated_buy_price * (1 + actual_markup)
             
+            # 高峰時段價格調整
+            if self._is_us_peak_hours():
+                peak_multiplier = self.trading_config.selling.peak_hours_selling_multiplier
+                original_price = selling_price
+                selling_price = selling_price * peak_multiplier
+                logger.debug(f"高峰時段銷售價格調整: {item.item_name} ${original_price:.2f} -> ${selling_price:.2f} (+{(peak_multiplier-1)*100:.0f}%)")
+            
             # 確保賣出價格合理（不要過高導致無法銷售）
-            # 最高不超過 max_buy_price 的 130%
-            max_reasonable_price = max_buy_price * 1.30
+            # 最高不超過 max_buy_price 的 130%（高峰時段放寬到150%）
+            max_multiplier = 1.50 if self._is_us_peak_hours() else 1.30
+            max_reasonable_price = max_buy_price * max_multiplier
             selling_price = min(selling_price, max_reasonable_price)
             
             logger.debug(f"配置定價: {item.item_name} - 估算買入${estimated_buy_price:.2f}, 加價{actual_markup:.1%} -> 售價${selling_price:.2f} (上限${max_reasonable_price:.2f})")

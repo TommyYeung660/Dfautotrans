@@ -32,6 +32,11 @@ class BuyingConfig:
     diversification_enabled: bool = True
     priority_items: Dict[str, int] = None  # 物品優先級
     price_analysis_samples: int = 20
+    # 高峰時段配置
+    peak_hours_enabled: bool = True
+    peak_hours_start: int = 19  # 美國東部時間晚上7點
+    peak_hours_end: int = 23   # 美國東部時間晚上11點
+    peak_hours_max_price_multiplier: float = 1.2  # 高峰時段最大價格提升20%
 
     def __post_init__(self):
         if self.priority_items is None:
@@ -69,6 +74,11 @@ class SellingConfig:
     max_selling_slots_used: int = 25
     selling_slots_threshold_percentage: float = 0.95
     price_adjustment_enabled: bool = True
+    # 高峰時段配置
+    peak_hours_enabled: bool = True
+    peak_hours_start: int = 19  # 美國東部時間晚上7點
+    peak_hours_end: int = 23   # 美國東部時間晚上11點
+    peak_hours_selling_multiplier: float = 1.3  # 高峰時段銷售價格提升30%
 
 @dataclass
 class RiskManagementConfig:

@@ -8,6 +8,7 @@ import asyncio
 import logging
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
+import pytz
 
 from ..data.models import (
     MarketItemData, PurchaseOpportunity, MarketCondition, 
@@ -44,6 +45,33 @@ class BuyingStrategy:
         self.purchase_history: List[PurchaseOpportunity] = []  # 購買歷史
         
         logger.info(f"購買策略初始化完成，最小利潤率: {config.min_profit_margin:.1%}")
+        
+    def _is_us_peak_hours(self) -> bool:
+        """檢查當前是否為美國高峰時段（美國東部時間19:00-23:59）"""
+        if not self.trading_config.buying.peak_hours_enabled:
+            return False
+            
+        try:
+            # 獲取美國東部時間
+            us_eastern = pytz.timezone('US/Eastern')
+            us_time = datetime.now(us_eastern)
+            current_hour = us_time.hour
+            
+            start_hour = self.trading_config.buying.peak_hours_start
+            end_hour = self.trading_config.buying.peak_hours_end
+            
+            # 處理跨日情況
+            if start_hour <= end_hour:
+                is_peak = start_hour <= current_hour <= end_hour
+            else:
+                is_peak = current_hour >= start_hour or current_hour <= end_hour
+            
+            logger.debug(f"美國東部時間: {us_time.strftime('%H:%M')}, 高峰時段: {is_peak}")
+            return is_peak
+            
+        except Exception as e:
+            logger.warning(f"檢查高峰時段時出錯: {e}")
+            return False
 
     async def evaluate_market_items(
         self, 
@@ -138,13 +166,22 @@ class BuyingStrategy:
         return True
 
     def _get_max_price_for_item(self, item_name: str) -> Optional[float]:
-        """獲取物品的最大購買價格"""
+        """獲取物品的最大購買價格（考慮高峰時段調整）"""
         try:
             target_items = self.trading_config.market_search.target_items
             max_prices = self.trading_config.market_search.max_price_per_unit
             
             item_index = target_items.index(item_name)
-            return max_prices[item_index]
+            base_price = max_prices[item_index]
+            
+            # 高峰時段價格調整
+            if self._is_us_peak_hours():
+                multiplier = self.trading_config.buying.peak_hours_max_price_multiplier
+                adjusted_price = base_price * multiplier
+                logger.debug(f"高峰時段價格調整: {item_name} {base_price:.2f} -> {adjusted_price:.2f} (+{(multiplier-1)*100:.0f}%)")
+                return adjusted_price
+            
+            return base_price
         except (ValueError, IndexError):
             return None
 
