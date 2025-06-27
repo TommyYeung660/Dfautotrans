@@ -115,9 +115,12 @@ class MarketOperations:
         try:
             logger.info(f"🔍 開始掃描市場物品 (搜索詞: {search_term}, 最多: {max_items})")
             
-            # 確保在購買標籤頁
+            # 修復：確保在購買標籤頁，並添加明確的驗證日誌
             if not await self._ensure_marketplace_session('buy'):
+                logger.error("❌ 無法確保在購買標籤頁，掃描終止")
                 return []
+            
+            logger.debug("✅ 已確認在購買標籤頁，開始市場掃描")
             
             # 其餘邏輯保持不變
             await asyncio.sleep(2)
@@ -341,13 +344,10 @@ class MarketOperations:
         try:
             logger.info("📊 檢查銷售位狀態...")
             
-            # Navigate to marketplace
-            if not await self.page_navigator.navigate_to_marketplace():
-                logger.error("❌ 無法導航到市場頁面")
+            # 修復：使用統一的session管理確保在selling tab
+            if not await self._ensure_marketplace_session('sell'):
+                logger.error("❌ 無法確保在銷售標籤頁")
                 return None
-            
-            # Switch to selling tab
-            await self._ensure_sell_tab_active()
             
             # Extract selling slots information
             slots_info = await self._extract_selling_slots_info()
@@ -377,6 +377,11 @@ class MarketOperations:
         try:
             items = await self.scan_market_items()
             selling_status = await self.get_selling_slots_status()
+            
+            # 修復：獲取selling slots status後切換回buying tab
+            # 因為get_selling_slots_status()會切換到selling tab，但後續市場分析需要在buying tab
+            logger.debug("📋 獲取selling status後切換回buying tab")
+            await self._ensure_marketplace_session('buy')
             
             # Analyze items
             item_count = len(items)
@@ -474,6 +479,9 @@ class MarketOperations:
             # Check and close any fancybox overlay before search
             await self.browser_manager.close_fancybox_overlay()
             
+            # 修復：檢查並關閉可能攔截點擊的prompt對話框
+            await self._close_blocking_prompts()
+            
             # Find search input field (from marketplace_helper.js: searchField)
             search_input = await self.page.query_selector("#searchField")
             if not search_input:
@@ -509,9 +517,17 @@ class MarketOperations:
                 else:
                     logger.debug("搜索按鈕已啟用，點擊...")
                 
+                # 修復：搜索前再次檢查攔截對話框
+                await self._close_blocking_prompts()
+                
                 # Click the search button
-                await search_button.click()
-                logger.debug("搜索按鈕已點擊")
+                try:
+                    await search_button.click()
+                    logger.debug("搜索按鈕已點擊")
+                except Exception as click_error:
+                    logger.warning(f"搜索按鈕點擊失敗，嘗試強制點擊: {click_error}")
+                    await search_button.click(force=True)
+                    
                 await asyncio.sleep(5)  # Wait longer for search results to load
                 
                 # Verify search was executed by checking for results
@@ -1013,6 +1029,17 @@ class MarketOperations:
                 if popup:
                     logger.debug("找到確認對話框 #gamecontent")
                     
+                    # 修復：檢查是否為錯過物品的提示
+                    popup_text = await popup.inner_text()
+                    if "You have missed this item" in popup_text or "This item is no longer available" in popup_text:
+                        logger.warning(f"⚠️ 物品不可用: {popup_text.strip()}")
+                        # 點擊OK按鈕關閉提示
+                        ok_button = await popup.query_selector("button")
+                        if ok_button:
+                            await ok_button.click()
+                            await asyncio.sleep(1)
+                        return False  # 購買失敗
+                    
                     # Look for elements with innerHTML "Yes" (from marketplace_helper.js)
                     # Use XPath to find element with exact text "Yes"
                     yes_buttons = await self.page.query_selector_all("#gamecontent *")
@@ -1504,5 +1531,41 @@ class MarketOperations:
             
         except Exception as e:
             logger.error(f"❌ 確認上架失敗: {e}")
+            return False
+
+    async def _close_blocking_prompts(self) -> bool:
+        """關閉可能攔截操作的提示對話框"""
+        try:
+            # 檢查常見的攔截對話框
+            prompt_selectors = [
+                "#prompt",  # 通用提示框
+                "#gamecontent div:has-text('You have missed this item')",  # 錯過物品提示
+                "#gamecontent div:has-text('This item is no longer available')",  # 物品不可用提示
+                "div[style*='position: absolute'] button:has-text('ok')",  # OK按鈕
+                "div[style*='position: absolute'] button:has-text('OK')",  # OK按鈕（大寫）
+                "button:has-text('ok')",  # 通用OK按鈕
+                "button:has-text('OK')"   # 通用OK按鈕（大寫）
+            ]
+            
+            for selector in prompt_selectors:
+                try:
+                    elements = await self.page.query_selector_all(selector)
+                    for element in elements:
+                        # 檢查元素是否可見
+                        is_visible = await element.is_visible()
+                        if is_visible:
+                            logger.debug(f"發現攔截對話框，嘗試關閉: {selector}")
+                            await element.click()
+                            await asyncio.sleep(0.5)
+                            logger.debug("✅ 成功關閉攔截對話框")
+                            return True
+                except Exception as e:
+                    logger.debug(f"檢查選擇器 {selector} 時出錯: {e}")
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"關閉攔截對話框時出錯: {e}")
             return False
  
