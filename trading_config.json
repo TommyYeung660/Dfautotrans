@@ -7,7 +7,10 @@
       "10 Gauge Shells",
       "12 Gauge Shells",
       "Energy Cell",
-      "Gasoline"
+      "Gasoline",
+      "Nerotonin 5A",
+      "Duct Tape",
+      "Repair Kit"
     ],
     "max_price_per_unit": [
       11.0,
@@ -16,7 +19,10 @@
       29.0,
       17.0,
       15.0,
-      2.8
+      2.8,
+      30000.0,
+      8000.0,
+      26000.0
     ],
     "max_items_per_search": 13,
     "search_timeout_seconds": 15
@@ -29,7 +35,10 @@
       "10 Gauge Shells": "10gaugeammo",
       "12 Gauge Shells": "12gaugeammo",
       "Energy Cell": "energycellammo",
-      "Gasoline": "fuelammo"
+      "Gasoline": "fuelammo",
+      "Nerotonin 5A": "nerotonin5a",
+      "Duct Tape": "ducttape",
+      "Repair Kit": "repairkit"
     },
     "id_to_name": {
       "127rifleammo": "12.7mm Rifle Bullets",
@@ -38,7 +47,10 @@
       "10gaugeammo": "10 Gauge Shells",
       "12gaugeammo": "12 Gauge Shells",
       "energycellammo": "Energy Cell",
-      "fuelammo": "Gasoline"
+      "fuelammo": "Gasoline",
+      "nerotonin5a": "Nerotonin 5A",
+      "ducttape": "Duct Tape",
+      "repairkit": "Repair Kit"
     }
   },
   "buying": {
@@ -52,7 +64,10 @@
       "10 Gauge Shells": 4,
       "12 Gauge Shells": 5,
       "Energy Cell": 6,
-      "Gasoline": 7
+      "Gasoline": 7,
+      "Nerotonin 5A": 8,
+      "Duct Tape": 9,
+      "Repair Kit": 10
     },
     "price_analysis_samples": 20,
     "peak_hours_enabled": true,
