@@ -68,6 +68,14 @@ async def demo_trading_engine():
     print("🔧 初始化交易引擎...")
     trading_engine = TradingEngine(config, database_manager)
     
+    # 打印新配置系統信息
+    print(f"📋 新配置系統已載入:")
+    print(f"   配置文件: trading_config.json")
+    print(f"   購買策略: 最大購買{trading_engine.trading_config.buying.max_purchases_per_cycle}個/週期")
+    print(f"   銷售策略: 加價{trading_engine.trading_config.selling.markup_percentage:.1%}")
+    print(f"   目標物品: {len(trading_engine.trading_config.market_search.target_items)}種")
+    print()
+    
     try:
         # 啟動交易會話
         print("🚀 啟動交易會話...")
@@ -81,36 +89,52 @@ async def demo_trading_engine():
         print()
         
         # 執行多個交易週期演示
-        max_cycles = 3  # 演示3個交易週期
+        max_cycles = 2  # 演示2個交易週期
         successful_cycles = 0
         
         for cycle_num in range(1, max_cycles + 1):
             print(f"🔄 執行交易週期 {cycle_num}/{max_cycles}")
             print("-" * 40)
             
+            # 顯示週期開始前的狀態
+            status_before = trading_engine.get_current_status()
+            print(f"📊 週期前狀態: {status_before['current_state']}")
+            
             # 執行交易週期
             cycle_success = await trading_engine.run_trading_cycle()
+            
+            # 顯示週期結束後的狀態
+            status_after = trading_engine.get_current_status()
             
             if cycle_success:
                 successful_cycles += 1
                 print(f"✅ 交易週期 {cycle_num} 完成")
                 
-                # 顯示當前狀態
-                status = trading_engine.get_current_status()
-                print(f"📊 當前狀態: {status['current_state']}")
-                print(f"📈 成功週期: {status['session_stats']['successful_cycles']}")
-                print(f"🛒 總購買次數: {status['session_stats']['total_purchases']}")
-                print(f"💰 總銷售次數: {status['session_stats']['total_sales']}")
+                # 顯示詳細狀態變化
+                print(f"📊 週期後狀態: {status_after['current_state']}")
+                print(f"📈 成功週期: {status_after['session_stats']['successful_cycles']}")
+                print(f"🛒 總購買次數: {status_after['session_stats']['total_purchases']}")
+                print(f"💰 總銷售次數: {status_after['session_stats']['total_sales']}")
+                
+                # 計算週期變化
+                purchases_this_cycle = (status_after['session_stats']['total_purchases'] - 
+                                      status_before['session_stats']['total_purchases'])
+                sales_this_cycle = (status_after['session_stats']['total_sales'] - 
+                                  status_before['session_stats']['total_sales'])
+                
+                print(f"🔄 本週期變化: 購買{purchases_this_cycle}次, 銷售{sales_this_cycle}次")
                 
                 # 演示模式：短暫等待而不是完整等待週期
                 if cycle_num < max_cycles:
                     print("⏸️ 等待下一個週期...")
-                    await asyncio.sleep(5)  # 演示模式：只等待5秒
+                    await asyncio.sleep(3)  # 演示模式：只等待3秒
                 
             else:
                 print(f"❌ 交易週期 {cycle_num} 失敗")
+                print(f"📊 失敗後狀態: {status_after['current_state']}")
+                print(f"⚠️ 連續錯誤: {status_after['consecutive_errors']}")
                 # 演示模式：即使失敗也繼續下一個週期
-                await asyncio.sleep(3)
+                await asyncio.sleep(2)
             
             print()
         
@@ -140,18 +164,22 @@ async def demo_trading_engine():
         if buying_stats['total_purchases'] > 0:
             print(f"🛒 購買策略統計:")
             print(f"   總購買次數: {buying_stats['total_purchases']}")
+            print(f"   最近購買次數: {buying_stats.get('recent_purchases', 0)}")
             print(f"   平均利潤率: {buying_stats.get('recent_avg_profit_margin', 0):.1%}")
-            print(f"   風險分布: {buying_stats.get('risk_distribution', {})}")
-            print(f"   熱門物品購買: {buying_stats.get('popular_items_purchased', 0)}")
+            print(f"   目標物品購買: {buying_stats.get('target_items_purchased', 0)}")
+        else:
+            print("🛒 購買策略統計: 本次演示未執行購買操作")
         
         # 銷售策略統計
         selling_stats = trading_engine.selling_strategy.analyze_selling_performance()
         if selling_stats['total_sales'] > 0:
             print(f"💰 銷售策略統計:")
             print(f"   總銷售次數: {selling_stats['total_sales']}")
+            print(f"   最近銷售次數: {selling_stats.get('recent_sales', 0)}")
             print(f"   總銷售價值: ${selling_stats.get('recent_total_value', 0):,.2f}")
             print(f"   平均銷售價值: ${selling_stats.get('recent_average_value', 0):,.2f}")
-            print(f"   熱門物品銷售: {selling_stats.get('popular_items_sold', 0)}")
+        else:
+            print("💰 銷售策略統計: 本次演示未執行銷售操作")
         
         print()
         print("🎯 階段3交易引擎演示完成!")

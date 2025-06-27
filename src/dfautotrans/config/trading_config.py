@@ -18,48 +18,98 @@ class MarketSearchConfig:
     max_price_per_unit: List[float]  # 每種物品的最大購買價格（與target_items對應）
     max_items_per_search: int = 75
     search_timeout_seconds: int = 30
+    
+    @property
+    def primary_search_terms(self) -> List[str]:
+        """返回目標物品清單作為搜索詞 - 向後兼容"""
+        return self.target_items
 
 @dataclass
 class BuyingConfig:
     """購買策略配置"""
     min_profit_margin: float = 0.15  # 最小利潤率
-    max_purchases_per_cycle: int = 8
+    max_purchases_per_cycle: int = 10
     diversification_enabled: bool = True
     priority_items: Dict[str, int] = None  # 物品優先級
     price_analysis_samples: int = 20
-    price_volatility_threshold: float = 0.3
 
     def __post_init__(self):
         if self.priority_items is None:
             self.priority_items = {}
+    
+    # 向後兼容的屬性
+    @property
+    def max_total_investment(self) -> float:
+        """最大總投資額 - 向後兼容"""
+        return 100000.0
+    
+    @property
+    def max_item_price(self) -> float:
+        """最大單件物品價格 - 向後兼容"""
+        return 50000.0
+    
+    @property
+    def max_high_risk_purchases(self) -> int:
+        """最多高風險購買數量 - 向後兼容"""
+        return 3
+    
+    @property
+    def diversification_limit(self) -> int:
+        """同類物品最大購買數量 - 向後兼容"""
+        return 5
 
 @dataclass
 class SellingConfig:
     """銷售策略配置"""
-    markup_percentage: float = 0.25  # 標準加價比例
+    markup_percentage: float = 0.2  # 標準加價比例
     min_markup_percentage: float = 0.1
     max_markup_percentage: float = 0.5
-    max_inventory_slots_used: int = 40
+    max_inventory_slots_used: int = 25
     inventory_threshold_percentage: float = 0.8
-    max_selling_slots_used: int = 20
-    selling_slots_threshold_percentage: float = 0.7
+    max_selling_slots_used: int = 25
+    selling_slots_threshold_percentage: float = 0.95
     price_adjustment_enabled: bool = True
 
 @dataclass
 class RiskManagementConfig:
     """風險管理配置"""
     max_consecutive_failures: int = 3
-    failure_cooldown_minutes: int = 30
+    failure_cooldown_minutes: int = 5
     anti_detection_enabled: bool = True
     random_delay_range: Tuple[int, int] = (2, 8)
-    max_operations_per_hour: int = 30
+    max_operations_per_hour: int = 50
+    
+    # 向後兼容的屬性
+    @property
+    def normal_wait_seconds(self) -> int:
+        """正常等待時間 - 向後兼容"""
+        return 60
+    
+    @property
+    def blocked_wait_seconds(self) -> int:
+        """阻塞等待時間 - 向後兼容"""
+        return 300
+    
+    @property
+    def login_retry_wait_seconds(self) -> int:
+        """登錄重試等待時間 - 向後兼容"""
+        return 30
+    
+    @property
+    def max_retries(self) -> int:
+        """最大重試次數 - 向後兼容"""
+        return 3
+    
+    @property
+    def max_login_retries(self) -> int:
+        """最大登錄重試次數 - 向後兼容"""
+        return 5
 
 @dataclass
 class PerformanceConfig:
     """性能優化配置"""
-    market_cache_duration_minutes: int = 5
-    price_cache_duration_minutes: int = 10
-    max_concurrent_operations: int = 3
+    market_cache_duration_minutes: int = 1
+    price_cache_duration_minutes: int = 1
     operation_timeout_seconds: int = 60
     max_retries: int = 3
     retry_delay_seconds: int = 5
@@ -78,8 +128,8 @@ class TradingConfig:
     trading_enabled: bool = True
     debug_mode: bool = False
     dry_run_mode: bool = False
-    max_trading_cycles: int = 10
-    cycle_interval_minutes: int = 30
+    max_trading_cycles: int = 0
+    cycle_interval_minutes: int = 10
     session_timeout_hours: int = 8
     detailed_logging: bool = True
     log_all_market_data: bool = False
@@ -213,19 +263,60 @@ class TradingConfigManager:
             
         return item_name in self.config.market_search.target_items
     
+    def get_item_id_by_name(self, item_name: str) -> Optional[str]:
+        """根據物品名稱獲取data-type ID"""
+        if not self.config_file.exists():
+            return None
+            
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data.get("item_mapping", {}).get("name_to_id", {}).get(item_name)
+        except:
+            return None
+    
+    def get_item_name_by_id(self, item_id: str) -> Optional[str]:
+        """根據data-type ID獲取物品名稱"""
+        if not self.config_file.exists():
+            return None
+            
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data.get("item_mapping", {}).get("id_to_name", {}).get(item_id)
+        except:
+            return None
+    
+    def get_item_mapping(self) -> Dict[str, str]:
+        """獲取物品名稱到ID的映射"""
+        if not self.config_file.exists():
+            return {}
+            
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data.get("item_mapping", {}).get("name_to_id", {})
+        except:
+            return {}
+    
     def _create_default_config(self) -> TradingConfig:
         """創建默認配置"""
         return TradingConfig(
             market_search=MarketSearchConfig(
-                target_items=["12.7mm Rifle Bullets", "9mm Rifle Bullets", "Pain Killers", "Bandages"],
-                max_price_per_unit=[13.0, 15.0, 25.0, 8.0]
+                target_items=["12.7mm Rifle Bullets", "14mm Rifle Bullets", "9mm Rifle Bullets", "10 Gauge Shells", "12 Gauge Shells", "Energy Cell", "Gasoline"],
+                max_price_per_unit=[11.0, 13.0, 11.0, 15.0, 16.0, 15.0, 3.0],
+                max_items_per_search=13,
+                search_timeout_seconds=15
             ),
             buying=BuyingConfig(
                 priority_items={
                     "12.7mm Rifle Bullets": 1,
-                    "9mm Rifle Bullets": 2,
-                    "Pain Killers": 3,
-                    "Bandages": 4
+                    "14mm Rifle Bullets": 2,
+                    "9mm Rifle Bullets": 3,
+                    "10 Gauge Shells": 4,
+                    "12 Gauge Shells": 5,
+                    "Energy Cell": 6,
+                    "Gasoline": 7
                 }
             ),
             selling=SellingConfig(),
@@ -297,6 +388,7 @@ class TradingConfigManager:
         print(f"  最小利潤率: {self.config.buying.min_profit_margin:.1%}")
         print(f"  每週期最大購買: {self.config.buying.max_purchases_per_cycle}")
         print(f"  多樣化投資: {'啟用' if self.config.buying.diversification_enabled else '禁用'}")
+        print(f"  價格分析樣本: {self.config.buying.price_analysis_samples}")
         
         # 銷售配置
         print(f"\n📈 銷售策略:")
@@ -329,6 +421,8 @@ def load_config() -> TradingConfig:
 
 def get_config() -> Optional[TradingConfig]:
     """獲取當前配置"""
+    if config_manager.config is None:
+        config_manager.load_config()
     return config_manager.config
 
 def update_config(updates: Dict[str, Any]) -> bool:

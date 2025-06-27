@@ -222,9 +222,9 @@ class TradingEngine:
                 self.current_session.login_failures += 1
                 
                 # 重試登錄
-                if self.current_session.login_failures < self.config.max_login_retries:
-                    logger.info(f"🔄 等待 {self.config.login_retry_wait_seconds} 秒後重試登錄")
-                    await asyncio.sleep(self.config.login_retry_wait_seconds)
+                if self.current_session.login_failures < self.trading_config.risk_management.max_login_retries:
+                    logger.info(f"🔄 等待 {self.trading_config.risk_management.login_retry_wait_seconds} 秒後重試登錄")
+                    await asyncio.sleep(self.trading_config.risk_management.login_retry_wait_seconds)
                     return await self._execute_login_check()
                 else:
                     logger.error("❌ 登錄重試次數已達上限")
@@ -253,25 +253,25 @@ class TradingEngine:
             inventory_status = await self.inventory_manager.get_inventory_status()
             if not inventory_status:
                 logger.warning("⚠️ 無法獲取庫存狀態，使用默認值")
-                inventory_used, inventory_total = 0, 50
+                inventory_used, inventory_total = 0, 26
             else:
                 inventory_used = inventory_status.get('used', 0) if isinstance(inventory_status, dict) else inventory_status.current_count
-                inventory_total = inventory_status.get('total', 50) if isinstance(inventory_status, dict) else inventory_status.max_capacity
+                inventory_total = inventory_status.get('total', 26) if isinstance(inventory_status, dict) else inventory_status.max_capacity
             
             # 獲取倉庫狀態
             storage_status = await self.inventory_manager.get_storage_status()
             if not storage_status:
                 logger.warning("⚠️ 無法獲取倉庫狀態，使用默認值")
-                storage_used, storage_total = 0, 1000
+                storage_used, storage_total = 0, 40
             else:
                 storage_used = storage_status.get('used', 0) if isinstance(storage_status, dict) else storage_status.current_count
-                storage_total = storage_status.get('total', 1000) if isinstance(storage_status, dict) else storage_status.max_capacity
+                storage_total = storage_status.get('total', 40) if isinstance(storage_status, dict) else storage_status.max_capacity
             
             # 獲取銷售位狀態
             selling_slots_status = await self.market_operations.get_selling_slots_status()
             if not selling_slots_status:
                 logger.warning("⚠️ 無法獲取銷售位狀態，使用默認值")
-                selling_slots_used, selling_slots_total = 0, 30
+                selling_slots_used, selling_slots_total = 0, 26
             else:
                 selling_slots_used = selling_slots_status.current_listings
                 selling_slots_total = selling_slots_status.max_slots
@@ -295,7 +295,7 @@ class TradingEngine:
                        f"銷售位: {resources.selling_slots_used}/{resources.selling_slots_total}")
             
             # 檢查是否需要從銀行提取資金
-            if current_cash < 10000 and bank_balance > 0:
+            if current_cash < 100000 and bank_balance > 0:
                 logger.info("💸 現金不足，從銀行提取資金")
                 await self.bank_operations.withdraw_all_funds()
                 resources.current_cash = await self.page_navigator.get_current_cash()
@@ -343,7 +343,7 @@ class TradingEngine:
             return False
 
     async def _execute_market_analysis(self, resources: SystemResources) -> Optional[MarketCondition]:
-        """執行市場分析"""
+        """執行市場分析（優化版）"""
         try:
             logger.info("📊 執行市場分析")
             self.state_machine.set_state(TradingState.MARKET_SCANNING)
@@ -359,6 +359,9 @@ class TradingEngine:
                 max_items=max_items
             )
             logger.info(f"🔍 掃描到 {len(market_items)} 個市場物品")
+            
+            # 保存市場數據供購買階段重用
+            self._current_market_items = market_items
             
             # 使用購買策略評估物品
             purchase_opportunities = await self.buying_strategy.evaluate_market_items(
@@ -382,13 +385,19 @@ class TradingEngine:
             return None
 
     async def _execute_buying_phase(self, resources: SystemResources) -> bool:
-        """執行購買階段"""
+        """執行購買階段（優化版）"""
         try:
             logger.info("🛒 執行購買階段")
             self.state_machine.set_state(TradingState.BUYING)
             
-            # 獲取購買機會
-            market_items = await self.market_operations.scan_market_items()
+            # 獲取購買機會 - 重用市場分析階段的數據，避免重複掃描
+            if hasattr(self, '_current_market_items') and self._current_market_items:
+                logger.info("♻️ 重用市場分析數據，避免重複掃描")
+                market_items = self._current_market_items
+            else:
+                logger.info("🔍 重新掃描市場物品")
+                market_items = await self.market_operations.scan_market_items()
+            
             purchase_opportunities = await self.buying_strategy.evaluate_market_items(
                 market_items, resources
             )
@@ -397,21 +406,26 @@ class TradingEngine:
                 logger.info("ℹ️ 沒有值得購買的物品")
                 return True
             
-            # 執行購買
+            # 執行購買 - 市場操作會自動處理會話狀態
             successful_purchases = 0
-            for opportunity in purchase_opportunities[:5]:  # 限制每次最多購買5個物品
+            max_purchases = min(5, len(purchase_opportunities))  # 限制每次最多購買5個物品
+            
+            logger.info(f"🛒 計劃購買 {max_purchases} 個物品")
+            
+            for i, opportunity in enumerate(purchase_opportunities[:max_purchases], 1):
                 try:
-                    logger.info(f"🛒 嘗試購買: {opportunity.item.item_name} - "
+                    logger.info(f"🛒 購買第 {i}/{max_purchases} 個物品: {opportunity.item.item_name} - "
                                f"價格: ${opportunity.item.price} - "
                                f"利潤率: {opportunity.profit_potential:.1%}")
                     
+                    # 使用優化的購買方法（不會重複導航）
                     success = await self.market_operations.execute_purchase(opportunity.item)
                     
                     if success:
                         successful_purchases += 1
                         self.session_stats["total_purchases"] += 1
                         self.buying_strategy.record_purchase(opportunity)
-                        logger.info(f"✅ 購買成功: {opportunity.item.item_name}")
+                        logger.info(f"✅ 第 {i} 個物品購買成功: {opportunity.item.item_name}")
                         
                         # 更新資源狀況
                         resources.current_cash -= opportunity.item.price * opportunity.item.quantity
@@ -422,13 +436,13 @@ class TradingEngine:
                             logger.info("📦 庫存空間不足，停止購買")
                             break
                     else:
-                        logger.warning(f"⚠️ 購買失敗: {opportunity.item.item_name}")
+                        logger.warning(f"⚠️ 第 {i} 個物品購買失敗: {opportunity.item.item_name}")
                         
                 except Exception as e:
-                    logger.warning(f"⚠️ 購買物品時出錯 {opportunity.item.item_name}: {e}")
+                    logger.warning(f"⚠️ 購買第 {i} 個物品時出錯 {opportunity.item.item_name}: {e}")
                     continue
             
-            logger.info(f"🛒 購買階段完成，成功購買 {successful_purchases} 個物品")
+            logger.info(f"🛒 購買階段完成，成功購買 {successful_purchases}/{max_purchases} 個物品")
             return True
             
         except Exception as e:
@@ -436,7 +450,7 @@ class TradingEngine:
             return False
 
     async def _execute_selling_phase(self, resources: SystemResources) -> bool:
-        """執行銷售階段"""
+        """執行銷售階段（優化版）"""
         try:
             logger.info("💰 執行銷售階段")
             self.state_machine.set_state(TradingState.SELLING)
@@ -464,30 +478,48 @@ class TradingEngine:
                 logger.info("ℹ️ 沒有物品需要銷售")
                 return True
             
-            # 執行銷售
-            successful_sales = 0
-            for sell_order in sell_orders:
-                try:
-                    logger.info(f"💰 嘗試銷售: {sell_order.item.item_name} - "
-                               f"價格: ${sell_order.selling_price}")
-                    
-                    success = await self.market_operations.list_item_for_sale(
-                        sell_order.item.item_name, sell_order.selling_price
-                    )
-                    
+            logger.info(f"💰 計劃銷售 {len(sell_orders)} 個物品")
+            
+            # 使用批量上架功能 - 避免重複導航
+            if hasattr(self.market_operations, 'batch_list_items_for_sale'):
+                logger.info("📦 使用批量上架功能...")
+                results = await self.market_operations.batch_list_items_for_sale(sell_orders)
+                
+                # 統計結果
+                successful_sales = sum(results)
+                for i, (sell_order, success) in enumerate(zip(sell_orders, results), 1):
                     if success:
-                        successful_sales += 1
                         self.session_stats["total_sales"] += 1
                         self.selling_strategy.record_sale(sell_order)
-                        logger.info(f"✅ 銷售成功: {sell_order.item.item_name}")
+                        logger.info(f"✅ 第 {i} 個物品銷售成功: {sell_order.item.item_name}")
                     else:
-                        logger.warning(f"⚠️ 銷售失敗: {sell_order.item.item_name}")
+                        logger.warning(f"⚠️ 第 {i} 個物品銷售失敗: {sell_order.item.item_name}")
+            else:
+                # 降級到單個上架（保持向後兼容）
+                logger.info("🔄 使用單個上架模式...")
+                successful_sales = 0
+                for i, sell_order in enumerate(sell_orders, 1):
+                    try:
+                        logger.info(f"💰 銷售第 {i}/{len(sell_orders)} 個物品: {sell_order.item.item_name} - "
+                                   f"價格: ${sell_order.selling_price}")
                         
-                except Exception as e:
-                    logger.warning(f"⚠️ 銷售物品時出錯 {sell_order.item.item_name}: {e}")
-                    continue
+                        success = await self.market_operations.list_item_for_sale(
+                            sell_order.item.item_name, sell_order.selling_price
+                        )
+                        
+                        if success:
+                            successful_sales += 1
+                            self.session_stats["total_sales"] += 1
+                            self.selling_strategy.record_sale(sell_order)
+                            logger.info(f"✅ 第 {i} 個物品銷售成功: {sell_order.item.item_name}")
+                        else:
+                            logger.warning(f"⚠️ 第 {i} 個物品銷售失敗: {sell_order.item.item_name}")
+                            
+                    except Exception as e:
+                        logger.warning(f"⚠️ 銷售第 {i} 個物品時出錯 {sell_order.item.item_name}: {e}")
+                        continue
             
-            logger.info(f"💰 銷售階段完成，成功銷售 {successful_sales} 個物品")
+            logger.info(f"💰 銷售階段完成，成功銷售 {successful_sales}/{len(sell_orders)} 個物品")
             return True
             
         except Exception as e:
@@ -511,7 +543,7 @@ class TradingEngine:
             if self.consecutive_errors >= 3:
                 logger.warning("⚠️ 連續錯誤過多，進入長時間等待")
                 self.state_machine.set_state(TradingState.CRITICAL_ERROR)
-                await asyncio.sleep(self.config.blocked_wait_seconds)
+                await asyncio.sleep(self.trading_config.risk_management.blocked_wait_seconds)
             else:
                 await asyncio.sleep(30)  # 短暫等待後重試
                 
@@ -523,13 +555,13 @@ class TradingEngine:
         try:
             # 決定等待時間
             if resources.is_completely_blocked:
-                logger.info(f"⏸️ 系統完全阻塞，等待 {self.config.blocked_wait_seconds} 秒")
+                logger.info(f"⏸️ 系統完全阻塞，等待 {self.trading_config.risk_management.blocked_wait_seconds} 秒")
                 self.state_machine.set_state(TradingState.WAITING_BLOCKED)
-                await asyncio.sleep(self.config.blocked_wait_seconds)
+                await asyncio.sleep(self.trading_config.risk_management.blocked_wait_seconds)
             else:
-                logger.info(f"⏸️ 正常等待 {self.config.normal_wait_seconds} 秒")
+                logger.info(f"⏸️ 正常等待 {self.trading_config.risk_management.normal_wait_seconds} 秒")
                 self.state_machine.set_state(TradingState.WAITING_NORMAL)
-                await asyncio.sleep(self.config.normal_wait_seconds)
+                await asyncio.sleep(self.trading_config.risk_management.normal_wait_seconds)
                 
         except Exception as e:
             logger.error(f"❌ 等待過程中出錯: {e}")

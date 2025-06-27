@@ -11,7 +11,7 @@
 ### target_items
 - **說明**：目標物品清單，系統會精確匹配這些物品名稱進行購買
 - **類型**：字符串數組
-- **預設值**：`["12.7mm Rifle Bullets", "9mm Rifle Bullets", "Pain Killers", "Bandages"]`
+- **預設值**：`["12.7mm Rifle Bullets", "14mm Rifle Bullets", "9mm Rifle Bullets", "10 Gauge Shells", "12 Gauge Shells", "Energy Cell", "Gasoline"]`
 - **建議**：
   - 使用完整且精確的物品名稱
   - 系統只會購買完全匹配的物品，避免誤買
@@ -20,12 +20,15 @@
 ### max_price_per_unit
 - **說明**：每種目標物品的最大購買價格，與 target_items 數組一一對應
 - **類型**：浮點數數組
-- **預設值**：`[13.0, 15.0, 25.0, 8.0]`
+- **預設值**：`[11.0, 13.0, 11.0, 15.0, 16.0, 15.0, 3.0]`
 - **對應關係**：
-  - `12.7mm Rifle Bullets`: $13.0
-  - `9mm Rifle Bullets`: $15.0
-  - `Pain Killers`: $25.0
-  - `Bandages`: $8.0
+  - `12.7mm Rifle Bullets`: $11.0
+  - `14mm Rifle Bullets`: $13.0
+  - `9mm Rifle Bullets`: $11.0
+  - `10 Gauge Shells`: $15.0
+  - `12 Gauge Shells`: $16.0
+  - `Energy Cell`: $15.0
+  - `Gasoline`: $3.0
 - **建議**：
   - 根據每種物品的市場價格和利潤空間設定
   - 數組長度必須與 target_items 相同
@@ -34,17 +37,17 @@
 ### max_items_per_search
 - **說明**：每次搜索最多掃描的物品數量
 - **類型**：整數
-- **預設值**：`75`
+- **預設值**：`13`
 - **建議**：
-  - 50-100：平衡搜索全面性與速度
+  - 10-100：平衡搜索全面性與速度
   - 數值越大掃描越全面但耗時更長
   - 網路較慢時建議降低此值
 
 ### search_timeout_seconds
 - **說明**：搜索操作的超時時間（秒）
 - **類型**：整數
-- **預設值**：`30`
-- **建議**：20-60秒，防止搜索卡住
+- **預設值**：`15`
+- **建議**：10-60秒，防止搜索卡住
 
 ### max_total_investment
 - **說明**：單次交易週期的最大總投資額度
@@ -72,7 +75,7 @@
 ### max_purchases_per_cycle
 - **說明**：每個交易週期最多購買的物品數量
 - **類型**：整數
-- **預設值**：`8`
+- **預設值**：`10`
 - **建議**：
   - 新手：3-5
   - 有經驗：5-10
@@ -102,12 +105,6 @@
 - **預設值**：`5`
 - **建議**：保持投資多樣化
 
-### diversification_enabled
-- **說明**：是否啟用多樣化投資策略
-- **類型**：布林值
-- **預設值**：`true`
-- **建議**：建議保持開啟以降低風險
-
 ### priority_items
 - **說明**：物品購買優先級，數字越小優先級越高
 - **類型**：物件
@@ -115,9 +112,12 @@
   ```json
   {
     "12.7mm Rifle Bullets": 1,
-    "9mm Rifle Bullets": 2,
-    "Pain Killers": 3,
-    "Bandages": 4
+    "14mm Rifle Bullets": 2,
+    "9mm Rifle Bullets": 3,
+    "10 Gauge Shells": 4,
+    "12 Gauge Shells": 5,
+    "Energy Cell": 6,
+    "Gasoline": 7
   }
   ```
 - **建議**：根據市場需求和利潤率調整優先級
@@ -127,12 +127,6 @@
 - **類型**：整數
 - **預設值**：`20`
 - **建議**：10-30，樣本越多分析越準確但耗時更長
-
-### price_volatility_threshold
-- **說明**：價格波動閾值，超過此值視為市場不穩定
-- **類型**：浮點數 (0.3 = 30%)
-- **預設值**：`0.3`
-- **建議**：20-40%，根據市場穩定性調整
 
 ---
 
@@ -144,29 +138,11 @@
 - **預設值**：`100000.0`
 - **建議**：根據可用資金的 60-80% 設定
 
-### min_profit_margin
-- **說明**：最小利潤率要求，低於此利潤率不會購買
-- **類型**：浮點數 (0.15 = 15%)
-- **預設值**：`0.15`
-- **建議**：
-  - 保守：15-20%
-  - 積極：10-15%
-  - 高風險：5-10%
-
-### max_purchases_per_cycle
-- **說明**：每個交易週期最多購買的物品數量
-- **類型**：整數
-- **預設值**：`8`
-- **建議**：
-  - 新手：3-5
-  - 有經驗：5-10
-  - 專家：10-15
-
 ### diversification_enabled
-- **說明**：是否啟用多樣化投資策略
+- **說明**：是否啟用多樣化投資策略，避免過度集中投資單一物品類型
 - **類型**：布林值
 - **預設值**：`true`
-- **建議**：建議保持開啟以降低風險
+- **建議**：建議保持啟用以降低風險
 
 ### priority_items
 - **說明**：物品購買優先級，數字越小優先級越高
@@ -175,9 +151,12 @@
   ```json
   {
     "12.7mm Rifle Bullets": 1,
-    "9mm Rifle Bullets": 2,
-    "Pain Killers": 3,
-    "Bandages": 4
+    "14mm Rifle Bullets": 2,
+    "9mm Rifle Bullets": 3,
+    "10 Gauge Shells": 4,
+    "12 Gauge Shells": 5,
+    "Energy Cell": 6,
+    "Gasoline": 7
   }
   ```
 - **建議**：根據市場需求和利潤率調整優先級
@@ -188,20 +167,14 @@
 - **預設值**：`20`
 - **建議**：10-30，樣本越多分析越準確但耗時更長
 
-### price_volatility_threshold
-- **說明**：價格波動閾值，超過此值視為市場不穩定
-- **類型**：浮點數 (0.3 = 30%)
-- **預設值**：`0.3`
-- **建議**：20-40%，根據市場穩定性調整
-
 ---
 
 ## 3. 銷售策略配置 (selling)
 
 ### markup_percentage
 - **說明**：標準加價比例，購買價格基礎上的加價幅度
-- **類型**：浮點數 (0.25 = 25%)
-- **預設值**：`0.25`
+- **類型**：浮點數 (0.2 = 20%)
+- **預設值**：`0.2`
 - **建議**：
   - 快速周轉：15-25%
   - 穩定利潤：25-35%
@@ -234,8 +207,8 @@
 ### max_inventory_slots_used
 - **說明**：最大庫存使用格數，超過此數量會優先清理庫存
 - **類型**：整數
-- **預設值**：`40`
-- **建議**：根據總庫存空間的 70-80% 設定
+- **預設值**：`25`
+- **建議**：根據總庫存空間的 50-80% 設定
 
 ### inventory_threshold_percentage
 - **說明**：庫存使用率閾值，超過此比例會開始積極銷售
@@ -246,14 +219,14 @@
 ### max_selling_slots_used
 - **說明**：最大銷售位使用數量，控制同時上架的物品數量
 - **類型**：整數
-- **預設值**：`20`
+- **預設值**：`25`
 - **建議**：根據可用銷售位調整
 
 ### selling_slots_threshold_percentage
 - **說明**：銷售位使用率閾值，超過此比例會暫停新上架
-- **類型**：浮點數 (0.7 = 70%)
-- **預設值**：`0.7`
-- **建議**：60-80%
+- **類型**：浮點數 (0.95 = 95%)
+- **預設值**：`0.95`
+- **建議**：80-95%
 
 ### price_adjustment_enabled
 - **說明**：是否啟用動態價格調整
@@ -278,12 +251,6 @@
 - **類型**：浮點數 (0.8 = 80%)
 - **預設值**：`0.8`
 - **建議**：70-90%
-
-### quick_sell_enabled
-- **說明**：是否啟用快速銷售模式
-- **類型**：布林值
-- **預設值**：`false`
-- **建議**：急需現金時開啟
 
 ### quick_sell_price_ratio
 - **說明**：快速銷售的價格比例，以市場價此比例快速出售
@@ -337,8 +304,8 @@
 ### failure_cooldown_minutes
 - **說明**：失敗後的冷卻時間（分鐘）
 - **類型**：整數
-- **預設值**：`30`
-- **建議**：15-60分鐘
+- **預設值**：`5`
+- **建議**：5-60分鐘
 
 ### anti_detection_enabled
 - **說明**：是否啟用反檢測機制，模擬人類行為避免被系統檢測
@@ -358,8 +325,8 @@
 ### max_operations_per_hour
 - **說明**：每小時最大操作次數，限制操作頻率避免觸發反作弊
 - **類型**：整數
-- **預設值**：`30`
-- **建議**：20-50次
+- **預設值**：`50`
+- **建議**：20-100次
 
 ---
 
@@ -368,14 +335,14 @@
 ### market_cache_duration_minutes
 - **說明**：市場數據緩存時間（分鐘），避免頻繁重複掃描
 - **類型**：整數
-- **預設值**：`5`
-- **建議**：3-10分鐘
+- **預設值**：`1`
+- **建議**：1-10分鐘
 
 ### price_cache_duration_minutes
 - **說明**：價格數據緩存時間（分鐘）
 - **類型**：整數
-- **預設值**：`10`
-- **建議**：5-15分鐘
+- **預設值**：`1`
+- **建議**：1-15分鐘
 
 ### max_concurrent_operations
 - **說明**：最大並發操作數，同時執行的操作數量
@@ -435,14 +402,14 @@
 ### max_trading_cycles
 - **說明**：最大交易週期數，執行完指定次數後自動停止
 - **類型**：整數
-- **預設值**：`10`
+- **預設值**：`0`（無限制）
 - **建議**：根據需要調整，0 表示無限制
 
 ### cycle_interval_minutes
 - **說明**：交易週期間隔時間（分鐘）
 - **類型**：整數
-- **預設值**：`30`
-- **建議**：15-60分鐘
+- **預設值**：`10`
+- **建議**：5-60分鐘
 
 ### session_timeout_hours
 - **說明**：交易會話超時時間（小時）
@@ -469,36 +436,57 @@
 ### 新手設置
 ```json
 {
-  "target_items": ["12.7mm Rifle Bullets", "Pain Killers"],
-  "max_price_per_unit": [10.0, 20.0],
-  "min_profit_margin": 0.20,
-  "max_purchases_per_cycle": 3,
-  "max_cash_investment_ratio": 0.60,
-  "random_delay_range": [3, 10]
+  "market_search": {
+    "target_items": ["12.7mm Rifle Bullets", "9mm Rifle Bullets"],
+    "max_price_per_unit": [10.0, 10.0],
+    "max_items_per_search": 10
+  },
+  "buying": {
+    "min_profit_margin": 0.20,
+    "max_purchases_per_cycle": 3
+  },
+  "risk_management": {
+    "max_operations_per_hour": 20,
+    "random_delay_range": [3, 10]
+  }
 }
 ```
 
-### 標準設置
+### 標準設置（當前配置）
 ```json
 {
-  "target_items": ["12.7mm Rifle Bullets", "9mm Rifle Bullets", "Pain Killers", "Bandages"],
-  "max_price_per_unit": [13.0, 15.0, 25.0, 8.0],
-  "min_profit_margin": 0.15,
-  "max_purchases_per_cycle": 8,
-  "max_cash_investment_ratio": 0.80,
-  "random_delay_range": [2, 8]
+  "market_search": {
+    "target_items": ["12.7mm Rifle Bullets", "14mm Rifle Bullets", "9mm Rifle Bullets", "10 Gauge Shells", "12 Gauge Shells", "Energy Cell", "Gasoline"],
+    "max_price_per_unit": [11.0, 13.0, 11.0, 15.0, 16.0, 15.0, 3.0],
+    "max_items_per_search": 13
+  },
+  "buying": {
+    "min_profit_margin": 0.15,
+    "max_purchases_per_cycle": 10
+  },
+  "risk_management": {
+    "max_operations_per_hour": 50,
+    "random_delay_range": [2, 8]
+  }
 }
 ```
 
 ### 積極設置
 ```json
 {
-  "target_items": ["12.7mm Rifle Bullets", "9mm Rifle Bullets", "Pain Killers", "Bandages", "Antibiotics"],
-  "max_price_per_unit": [15.0, 18.0, 30.0, 10.0, 40.0],
-  "min_profit_margin": 0.10,
-  "max_purchases_per_cycle": 15,
-  "max_cash_investment_ratio": 0.90,
-  "random_delay_range": [1, 5]
+  "market_search": {
+    "target_items": ["12.7mm Rifle Bullets", "14mm Rifle Bullets", "9mm Rifle Bullets", "10 Gauge Shells", "12 Gauge Shells", "Energy Cell", "Gasoline", "Pain Killers", "Antibiotics"],
+    "max_price_per_unit": [15.0, 18.0, 15.0, 20.0, 20.0, 20.0, 5.0, 30.0, 40.0],
+    "max_items_per_search": 20
+  },
+  "buying": {
+    "min_profit_margin": 0.10,
+    "max_purchases_per_cycle": 15
+  },
+  "risk_management": {
+    "max_operations_per_hour": 80,
+    "random_delay_range": [1, 5]
+  }
 }
 ```
 
@@ -553,9 +541,15 @@ cp trading_config.json trading_config_backup_$(date +%Y%m%d).json
 - 提供更靈活的價格控制
 
 ### 3. 簡化配置結構
-- 移除了不必要的配置項，減少複雜性
+- 移除了複雜的持有時間和動態調價機制
+- 移除了市場波動檢測和投資限制
 - 保留核心功能，提高配置效率
 - 更容易理解和維護
+
+### 4. 多樣化投資
+- `diversification_enabled` 控制是否啟用多樣化投資策略
+- 避免過度集中投資單一物品類型
+- 降低市場風險
 
 ---
 
@@ -581,4 +575,7 @@ A: 在 `target_items` 數組中添加新物品名稱，同時在 `max_price_per_
 A: 大部分配置會在下一個交易週期生效，價格和目標物品的變更會立即生效。
 
 ### Q: 如何確保配置正確？
-A: 系統會自動驗證配置，特別是數組長度的一致性。如有錯誤會在啟動時提示。 
+A: 系統會自動驗證配置，特別是數組長度的一致性。如有錯誤會在啟動時提示。
+
+### Q: diversification_enabled 是什麼？
+A: 多樣化投資策略，啟用後會避免過度購買同類型物品，降低集中投資風險。 

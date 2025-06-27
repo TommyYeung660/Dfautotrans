@@ -1,7 +1,7 @@
 """
 Dead Frontier 自動交易系統 - 購買策略模組
 
-這個模組負責分析市場物品並做出智能購買決策。
+簡化的購買策略，基於 trading_config.json 配置進行決策。
 """
 
 import asyncio
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class BuyingStrategy:
-    """智能購買策略引擎"""
+    """簡化的購買策略引擎，基於配置決策"""
     
     def __init__(self, config: TradingConfiguration, trading_config: Optional[TradingConfig] = None):
         """
@@ -37,38 +37,11 @@ class BuyingStrategy:
         else:
             from ..config.trading_config import TradingConfigManager
             config_manager = TradingConfigManager()
-            self.trading_config = config_manager.get_config()
+            self.trading_config = config_manager.load_config()
         
         # 向後兼容的配置屬性
         self.config = config
-        self.item_history: Dict[str, List[float]] = {}  # 物品歷史價格
         self.purchase_history: List[PurchaseOpportunity] = []  # 購買歷史
-        
-        # 物品類型風險評級
-        self.risk_categories = {
-            "ammo": "low",      # 彈藥 - 低風險
-            "weapon": "medium", # 武器 - 中風險
-            "armor": "medium",  # 護甲 - 中風險
-            "medical": "low",   # 醫療用品 - 低風險
-            "food": "low",      # 食物 - 低風險
-            "misc": "high",     # 雜項 - 高風險
-        }
-        
-        # 熱門物品列表（基於經驗的高流動性物品）
-        self.popular_items = {
-            "12.7mm Rifle Bullets": {"base_price": 15.0, "demand": "high"},
-            "7.62mm Rifle Bullets": {"base_price": 12.0, "demand": "high"},
-            "5.56mm Rifle Bullets": {"base_price": 10.0, "demand": "high"},
-            "12 Gauge Shells": {"base_price": 8.0, "demand": "medium"},
-            "Pain Killers": {"base_price": 25.0, "demand": "high"},
-            "Bandages": {"base_price": 15.0, "demand": "medium"},
-        }
-        
-        # 更新熱門物品的優先級（從配置中獲取）
-        priority_items = self.trading_config.buying.priority_items
-        for item_name, priority in priority_items.items():
-            if item_name in self.popular_items:
-                self.popular_items[item_name]["priority"] = priority
         
         logger.info(f"購買策略初始化完成，最小利潤率: {config.min_profit_margin:.1%}")
 
@@ -91,6 +64,7 @@ class BuyingStrategy:
         
         opportunities = []
         total_investment = 0.0
+        item_type_counts = {}  # 追蹤每種物品類型的購買數量（用於多樣化投資）
         
         for item in items:
             try:
@@ -98,28 +72,42 @@ class BuyingStrategy:
                 if not self._passes_basic_filters(item, resources):
                     continue
                 
+                # 多樣化投資檢查
+                if self.trading_config.buying.diversification_enabled:
+                    item_count = item_type_counts.get(item.item_name, 0)
+                    max_same_item = 5  # 每種物品最多買5次，避免過度集中
+                    if item_count >= max_same_item:
+                        logger.debug(f"跳過 {item.item_name}：已達到多樣化投資限制 ({item_count}/{max_same_item})")
+                        continue
+                
                 # 計算購買機會
                 opportunity = await self._evaluate_single_item(item, resources)
                 if opportunity:
                     # 檢查投資限制
                     item_cost = item.price * item.quantity
-                    max_investment = self.trading_config.buying.max_total_investment
-                    if total_investment + item_cost <= max_investment:
+                    if total_investment + item_cost <= resources.total_funds:
                         opportunities.append(opportunity)
                         total_investment += item_cost
+                        
+                        # 更新物品類型計數
+                        if self.trading_config.buying.diversification_enabled:
+                            item_type_counts[item.item_name] = item_type_counts.get(item.item_name, 0) + 1
+                        
                         logger.debug(f"添加購買機會: {item.item_name} - 利潤率: {opportunity.profit_potential:.1%}")
                     else:
-                        logger.debug(f"超出投資限制，跳過: {item.item_name}")
+                        logger.debug(f"超出資金限制，跳過: {item.item_name}")
                         
             except Exception as e:
                 logger.warning(f"評估物品時出錯 {item.item_name}: {e}")
                 continue
         
-        # 按優先級排序
-        opportunities.sort(key=lambda x: x.priority_score, reverse=True)
+        # 按利潤率排序（高利潤優先）
+        opportunities.sort(key=lambda x: x.profit_potential, reverse=True)
         
-        # 應用風險管理
-        opportunities = self._apply_risk_management(opportunities)
+        # 限制購買數量
+        max_purchases = self.trading_config.buying.max_purchases_per_cycle
+        if len(opportunities) > max_purchases:
+            opportunities = opportunities[:max_purchases]
         
         logger.info(f"評估完成，找到 {len(opportunities)} 個有價值的購買機會")
         return opportunities
@@ -127,24 +115,38 @@ class BuyingStrategy:
     def _passes_basic_filters(self, item: MarketItemData, resources: SystemResources) -> bool:
         """檢查物品是否通過基本過濾條件"""
         
-        # 價格過濾
-        item_total_price = item.price * item.quantity
-        if item_total_price > self.config.max_item_price:
+        # 只考慮配置中的目標物品
+        if item.item_name not in self.trading_config.market_search.target_items:
+            return False
+        
+        # 價格過濾 - 使用配置的max_price_per_unit
+        max_price = self._get_max_price_for_item(item.item_name)
+        if max_price is None or item.price > max_price:
             return False
         
         # 資金檢查
+        item_total_price = item.price * item.quantity
         if item_total_price > resources.total_funds:
             return False
         
-        # 數量合理性檢查
-        if item.quantity <= 0 or item.quantity > 10000:
-            return False
-        
-        # 單價合理性檢查
-        if item.price <= 0 or item.price > 100000:
+        # 使用配置的max_items_per_search進行數量合理性檢查
+        max_search_items = self.trading_config.market_search.max_items_per_search
+        reasonable_max_quantity = max_search_items * 100  # 動態調整合理數量上限
+        if item.quantity <= 0 or item.quantity > reasonable_max_quantity:
             return False
         
         return True
+
+    def _get_max_price_for_item(self, item_name: str) -> Optional[float]:
+        """獲取物品的最大購買價格"""
+        try:
+            target_items = self.trading_config.market_search.target_items
+            max_prices = self.trading_config.market_search.max_price_per_unit
+            
+            item_index = target_items.index(item_name)
+            return max_prices[item_index]
+        except (ValueError, IndexError):
+            return None
 
     async def _evaluate_single_item(
         self, 
@@ -161,16 +163,14 @@ class BuyingStrategy:
             
             # 計算利潤潛力
             profit_potential = (estimated_sell_price - item.price) / item.price
-            if profit_potential < self.config.min_profit_margin:
+            if profit_potential < self.trading_config.buying.min_profit_margin:
                 return None
             
-            # 風險評估
-            risk_level = self._assess_risk_level(item)
+            # 風險評估 - 使用配置的風險管理參數
+            risk_level = self._assess_item_risk(item, profit_potential)
             
-            # 計算優先級評分
-            priority_score = self._calculate_priority_score(
-                item, profit_potential, risk_level
-            )
+            # 計算優先級評分（基於利潤率和物品優先級）
+            priority_score = self._calculate_priority_score(item, profit_potential)
             
             return PurchaseOpportunity(
                 item=item,
@@ -185,148 +185,91 @@ class BuyingStrategy:
             return None
 
     def _estimate_sell_price(self, item: MarketItemData) -> float:
-        """估算物品的合理銷售價格"""
+        """
+        基於 trading_config.json 配置估算物品的合理銷售價格
         
-        # 基於熱門物品列表的估價
-        if item.item_name in self.popular_items:
-            base_info = self.popular_items[item.item_name]
-            base_price = base_info["base_price"]
-            demand_multiplier = 1.2 if base_info["demand"] == "high" else 1.1
-            return base_price * demand_multiplier
+        邏輯：使用配置的max_price_per_unit作為買入參考，在此基礎上加價估算售價
+        """
         
-        # 基於歷史價格的估價
-        if item.item_name in self.item_history:
-            history = self.item_history[item.item_name]
-            if len(history) >= 3:
-                avg_price = sum(history[-5:]) / len(history[-5:])  # 最近5次平均價格
-                return avg_price * 1.1  # 10%加價
+        # 獲取物品的最大購買價格作為參考
+        max_buy_price = self._get_max_price_for_item(item.item_name)
+        if max_buy_price is None:
+            return item.price * 1.2  # 默認20%利潤
         
-        # 基於物品類型的通用估價
-        category = self._categorize_item(item.item_name)
-        multipliers = {
-            "ammo": 1.15,    # 彈藥通常有15%利潤空間
-            "weapon": 1.25,  # 武器25%利潤空間
-            "armor": 1.20,   # 護甲20%利潤空間
-            "medical": 1.30, # 醫療用品30%利潤空間
-            "food": 1.20,    # 食物20%利潤空間
-            "misc": 1.50,    # 雜項50%利潤空間（高風險高回報）
-        }
+        # 使用與 selling_strategy.py 一致的邏輯
+        markup_percentage = self.trading_config.selling.markup_percentage
         
-        return item.price * multipliers.get(category, 1.20)
+        # 假設平均買入價格為 max_buy_price 的 85%
+        estimated_buy_price = max_buy_price * 0.85
+        
+        # 在買入價基礎上加價
+        estimated_sell_price = estimated_buy_price * (1 + markup_percentage)
+        
+        # 確保賣出價格合理（不要過高導致無法銷售）
+        # 最高不超過 max_buy_price 的 130%
+        max_reasonable_price = max_buy_price * 1.30
+        estimated_sell_price = min(estimated_sell_price, max_reasonable_price)
+        
+        logger.debug(f"估算售價: {item.item_name} - 買入參考${max_buy_price} -> 預估售價${estimated_sell_price:.2f}")
+        return estimated_sell_price
 
-    def _assess_risk_level(self, item: MarketItemData) -> str:
-        """評估物品的風險等級"""
-        
-        category = self._categorize_item(item.item_name)
-        base_risk = self.risk_categories.get(category, "medium")
-        
-        # 基於價格調整風險
-        if item.price > 30000:
-            if base_risk == "low":
-                base_risk = "medium"
-            elif base_risk == "medium":
-                base_risk = "high"
-        
-        # 基於數量調整風險
-        if item.quantity > 5000:
-            if base_risk == "low":
-                base_risk = "medium"
-        
-        return base_risk
-
-    def _categorize_item(self, item_name: str) -> str:
-        """根據物品名稱分類"""
-        
-        name_lower = item_name.lower()
-        
-        if any(keyword in name_lower for keyword in ["bullet", "shell", "ammo", "round"]):
-            return "ammo"
-        elif any(keyword in name_lower for keyword in ["rifle", "pistol", "shotgun", "weapon"]):
-            return "weapon"
-        elif any(keyword in name_lower for keyword in ["armor", "vest", "helmet", "protection"]):
-            return "armor"
-        elif any(keyword in name_lower for keyword in ["painkiller", "bandage", "medical", "health"]):
-            return "medical"
-        elif any(keyword in name_lower for keyword in ["food", "water", "drink", "meal"]):
-            return "food"
-        else:
-            return "misc"
-
-    def _calculate_priority_score(
-        self, 
-        item: MarketItemData, 
-        profit_potential: float, 
-        risk_level: str
-    ) -> float:
+    def _calculate_priority_score(self, item: MarketItemData, profit_potential: float) -> float:
         """計算物品的優先級評分"""
         
-        score = profit_potential * 100  # 基礎分數基於利潤率
+        # 基礎分數基於利潤率
+        score = profit_potential * 100
         
-        # 風險調整
-        risk_multipliers = {"low": 1.2, "medium": 1.0, "high": 0.8}
-        score *= risk_multipliers.get(risk_level, 1.0)
+        # 基於配置的優先級調整
+        priority_items = self.trading_config.buying.priority_items
+        if item.item_name in priority_items:
+            priority = priority_items[item.item_name]
+            # 優先級越低（數字越小）得分越高
+            priority_multiplier = 2.0 - (priority * 0.1)  # 1->1.9, 2->1.8, ..., 7->1.3
+            score *= priority_multiplier
         
-        # 熱門物品加分
-        if item.item_name in self.popular_items:
-            demand = self.popular_items[item.item_name]["demand"]
-            if demand == "high":
-                score *= 1.3
-            elif demand == "medium":
-                score *= 1.1
-        
-        # 數量合理性加分
+        # 數量合理性調整
         if 100 <= item.quantity <= 2000:
             score *= 1.1  # 合理數量加分
         elif item.quantity > 5000:
             score *= 0.9  # 數量過大減分
         
-        # 價格合理性加分
-        if 1000 <= (item.price * item.quantity) <= 30000:
+        # 價格合理性調整
+        item_total_price = item.price * item.quantity
+        if 1000 <= item_total_price <= 30000:
             score *= 1.1  # 合理總價加分
         
         return score
 
-    def _apply_risk_management(
-        self, 
-        opportunities: List[PurchaseOpportunity]
-    ) -> List[PurchaseOpportunity]:
-        """應用風險管理規則"""
+    def _assess_item_risk(self, item: MarketItemData, profit_potential: float) -> str:
+        """
+        基於配置參數評估物品風險等級
+        """
+        # 基於總價評估風險
+        total_price = item.price * item.quantity
         
-        filtered_opportunities = []
-        high_risk_count = 0
-        item_type_counts: Dict[str, int] = {}
+        # 高價物品風險較高
+        if total_price > 30000:
+            risk_level = "high"
+        elif total_price > 10000:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
         
-        for opportunity in opportunities:
-            # 限制高風險購買數量
-            if opportunity.risk_level == "high":
-                if high_risk_count >= self.config.max_high_risk_purchases:
-                    logger.debug(f"跳過高風險物品（已達上限）: {opportunity.item.item_name}")
-                    continue
-                high_risk_count += 1
-            
-            # 限制同類物品數量
-            item_category = self._categorize_item(opportunity.item.item_name)
-            current_count = item_type_counts.get(item_category, 0)
-            if current_count >= self.config.diversification_limit:
-                logger.debug(f"跳過同類物品（已達上限）: {opportunity.item.item_name}")
-                continue
-            
-            item_type_counts[item_category] = current_count + 1
-            filtered_opportunities.append(opportunity)
+        # 基於利潤率調整風險
+        if profit_potential < self.trading_config.buying.min_profit_margin * 1.2:
+            # 利潤率接近最低要求，風險較高
+            if risk_level == "low":
+                risk_level = "medium"
+            elif risk_level == "medium":
+                risk_level = "high"
         
-        logger.info(f"風險管理後保留 {len(filtered_opportunities)} 個購買機會")
-        return filtered_opportunities
-
-    def update_item_history(self, item_name: str, price: float):
-        """更新物品歷史價格"""
-        if item_name not in self.item_history:
-            self.item_history[item_name] = []
+        # 基於數量評估風險
+        if item.quantity > 2000:
+            if risk_level == "low":
+                risk_level = "medium"
         
-        self.item_history[item_name].append(price)
-        
-        # 只保留最近20個價格記錄
-        if len(self.item_history[item_name]) > 20:
-            self.item_history[item_name] = self.item_history[item_name][-20:]
+        logger.debug(f"風險評估: {item.item_name} - 總價${total_price}, 利潤率{profit_potential:.1%} -> {risk_level}")
+        return risk_level
 
     def get_market_condition_assessment(
         self, 
@@ -362,35 +305,25 @@ class BuyingStrategy:
         """記錄購買操作"""
         self.purchase_history.append(opportunity)
         
-        # 只保留最近100個購買記錄
-        if len(self.purchase_history) > 100:
-            self.purchase_history = self.purchase_history[-100:]
-        
-        # 更新物品歷史價格
-        self.update_item_history(
-            opportunity.item.item_name, 
-            opportunity.item.price
-        )
+        # 只保留最近50個購買記錄
+        if len(self.purchase_history) > 50:
+            self.purchase_history = self.purchase_history[-50:]
         
         logger.info(f"記錄購買: {opportunity.item.item_name} - 利潤率: {opportunity.profit_potential:.1%}")
 
     def get_strategy_statistics(self) -> Dict[str, any]:
         """獲取策略統計信息"""
         if not self.purchase_history:
-            return {"total_purchases": 0}
+            return {"total_purchases": 0, "avg_profit_margin": 0.0}
         
         recent_purchases = self.purchase_history[-20:]  # 最近20次購買
         
         return {
             "total_purchases": len(self.purchase_history),
+            "recent_purchases": len(recent_purchases),
             "recent_avg_profit_margin": sum(p.profit_potential for p in recent_purchases) / len(recent_purchases),
-            "risk_distribution": {
-                "low": len([p for p in recent_purchases if p.risk_level == "low"]),
-                "medium": len([p for p in recent_purchases if p.risk_level == "medium"]),
-                "high": len([p for p in recent_purchases if p.risk_level == "high"]),
-            },
-            "popular_items_purchased": len([
+            "target_items_purchased": len([
                 p for p in recent_purchases 
-                if p.item.item_name in self.popular_items
+                if p.item.item_name in self.trading_config.market_search.target_items
             ])
         } 

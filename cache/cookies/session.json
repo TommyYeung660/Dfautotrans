@@ -1,22 +1,32 @@
 {
-  "timestamp": "2025-06-25T12:23:04.173232",
+  "timestamp": "2025-06-27T10:37:54.418240",
   "cookies": [
     {
       "name": "lastLoginUser",
       "value": "to6606687",
       "domain": "fairview.deadfrontier.com",
       "path": "/onlinezombiemmo",
-      "expires": 1750908979,
+      "expires": 1751078269,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
-      "name": "playerHighestLevel",
-      "value": "45",
-      "domain": "fairview.deadfrontier.com",
-      "path": "/onlinezombiemmo",
-      "expires": 1781583766.93213,
+      "name": "__utma",
+      "value": "31934881.1876667026.1750991869.1750991869.1750991869.1",
+      "domain": ".deadfrontier.com",
+      "path": "/",
+      "expires": 1785551871.015938,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "__utmb",
+      "value": "31934881.0.10.1750991869",
+      "domain": ".deadfrontier.com",
+      "path": "/",
+      "expires": 1750993671,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
@@ -33,50 +43,30 @@
     },
     {
       "name": "__utmz",
-      "value": "31934881.1750822579.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none)",
+      "value": "31934881.1750991869.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none)",
       "domain": ".deadfrontier.com",
       "path": "/",
-      "expires": 1766593381,
+      "expires": 1766759871,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "DeadFrontierFairview",
-      "value": "a%3A4%3A%7Bi%3A0%3Bs%3A7%3A%229627257%22%3Bi%3A1%3Bs%3A40%3A%2229954715b916b50297d029a7078a3fae8df2c597%22%3Bi%3A2%3Bi%3A1940038580%3Bi%3A3%3Bi%3A0%3B%7D",
+      "value": "a%3A4%3A%7Bi%3A0%3Bs%3A7%3A%229627257%22%3Bi%3A1%3Bs%3A40%3A%2229954715b916b50297d029a7078a3fae8df2c597%22%3Bi%3A2%3Bi%3A1940207870%3Bi%3A3%3Bi%3A0%3B%7D",
       "domain": "fairview.deadfrontier.com",
       "path": "/",
-      "expires": 1785382580.14829,
+      "expires": 1785551870.182012,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "PHPSESSID",
-      "value": "cfuto7qql2un5on0e7epa3hi6t",
+      "value": "22sn58640c8poh8bvb6phcncko",
       "domain": "fairview.deadfrontier.com",
       "path": "/",
-      "expires": 1753414580.148339,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "__utma",
-      "value": "31934881.326784144.1750822579.1750822579.1750825355.2",
-      "domain": ".deadfrontier.com",
-      "path": "/",
-      "expires": 1785385381.082765,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "__utmb",
-      "value": "31934881.0.10.1750825355",
-      "domain": ".deadfrontier.com",
-      "path": "/",
-      "expires": 1750827181,
+      "expires": 1753583870.182079,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
@@ -84,9 +74,9 @@
   ],
   "last_url": "https://fairview.deadfrontier.com/onlinezombiemmo/index.php",
   "user_info": {
-    "cash": "852,826",
+    "cash": "0",
     "level": 45
   },
   "session_valid": true,
-  "expires_at": "2025-06-26T12:23:04.173232"
+  "expires_at": "2025-06-28T10:37:54.418240"
 }

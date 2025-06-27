@@ -545,8 +545,13 @@ class InventoryManager:
             quantity = int(quantity_str) if quantity_str else 1
             quality = int(quality_str) if quality_str else 1
             
-            # 從映射獲取物品名稱
-            item_name = self.item_type_mapping.get(item_type, item_type.replace('_', ' ').title())
+            # 使用配置映射獲取物品名稱
+            from ..config.trading_config import config_manager
+            item_name = config_manager.get_item_name_by_id(item_type)
+            
+            # 如果配置映射中沒有找到，使用舊的映射或默認名稱
+            if not item_name:
+                item_name = self.item_type_mapping.get(item_type, item_type.replace('_', ' ').title())
             
             item_info = InventoryItem(
                 slot=slot_number,

@@ -12,14 +12,34 @@
     "max_price_per_unit": [
       11.0,
       13.0,
-      11.0,
+      10.0,
+      31.0,
+      13.0,
       15.0,
-      16.0,
-      15.0,
-      3.0
+      2.8
     ],
     "max_items_per_search": 13,
     "search_timeout_seconds": 15
+  },
+  "item_mapping": {
+    "name_to_id": {
+      "12.7mm Rifle Bullets": "127rifleammo",
+      "14mm Rifle Bullets": "14rifleammo",
+      "9mm Rifle Bullets": "9rifleammo",
+      "10 Gauge Shells": "10gaugeammo",
+      "12 Gauge Shells": "12gaugeammo",
+      "Energy Cell": "energycellammo",
+      "Gasoline": "fuelammo"
+    },
+    "id_to_name": {
+      "127rifleammo": "12.7mm Rifle Bullets",
+      "14rifleammo": "14mm Rifle Bullets",
+      "9rifleammo": "9mm Rifle Bullets",
+      "10gaugeammo": "10 Gauge Shells",
+      "12gaugeammo": "12 Gauge Shells",
+      "energycellammo": "Energy Cell",
+      "fuelammo": "Gasoline"
+    }
   },
   "buying": {
     "min_profit_margin": 0.15,
@@ -34,33 +54,31 @@
       "Energy Cell": 6,
       "Gasoline": 7
     },
-    "price_analysis_samples": 20,
-    "price_volatility_threshold": 0.3
+    "price_analysis_samples": 20
   },
   "selling": {
     "markup_percentage": 0.2,
     "min_markup_percentage": 0.1,
     "max_markup_percentage": 0.5,
-    "max_inventory_slots_used": 40,
+    "max_inventory_slots_used": 25,
     "inventory_threshold_percentage": 0.8,
-    "max_selling_slots_used": 20,
-    "selling_slots_threshold_percentage": 0.7,
+    "max_selling_slots_used": 25,
+    "selling_slots_threshold_percentage": 0.95,
     "price_adjustment_enabled": true
   },
   "risk_management": {
     "max_consecutive_failures": 3,
-    "failure_cooldown_minutes": 30,
+    "failure_cooldown_minutes": 5,
     "anti_detection_enabled": true,
     "random_delay_range": [
       2,
       8
     ],
-    "max_operations_per_hour": 30
+    "max_operations_per_hour": 50
   },
   "performance": {
-    "market_cache_duration_minutes": 5,
-    "price_cache_duration_minutes": 10,
-    "max_concurrent_operations": 3,
+    "market_cache_duration_minutes": 1,
+    "price_cache_duration_minutes": 1,
     "operation_timeout_seconds": 60,
     "max_retries": 3,
     "retry_delay_seconds": 5,
@@ -69,8 +87,8 @@
   "trading_enabled": true,
   "debug_mode": false,
   "dry_run_mode": false,
-  "max_trading_cycles": 10,
-  "cycle_interval_minutes": 30,
+  "max_trading_cycles": 0,
+  "cycle_interval_minutes": 10,
   "session_timeout_hours": 8,
   "detailed_logging": true,
   "log_all_market_data": false
