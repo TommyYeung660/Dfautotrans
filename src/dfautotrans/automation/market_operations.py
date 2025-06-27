@@ -282,7 +282,7 @@ class MarketOperations:
                     
                     # 短暫間隔避免操作過快
                     if i < len(sell_orders):
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(0.5)  # 減少從1秒到0.5秒
                         
                 except Exception as e:
                     logger.error(f"❌ 上架第 {i} 個物品時出錯: {e}")
@@ -296,21 +296,21 @@ class MarketOperations:
             return [False] * len(sell_orders)
 
     async def _execute_listing_process(self, item_element, price: float) -> bool:
-        """執行單個物品的上架流程"""
+        """執行單個物品的上架流程（優化版）"""
         try:
             # 點擊空白區域清除菜單
             try:
                 game_content = await self.page.query_selector("#gamecontent")
                 if game_content:
                     await game_content.click()
-                    await asyncio.sleep(0.3)
+                    await asyncio.sleep(0.2)  # 減少從0.3到0.2
             except:
                 pass
             
             # 右鍵點擊物品
             logger.debug("🖱️ 右鍵點擊庫存位置...")
             await item_element.click(button="right")
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)  # 減少從1到0.5
             
             # 點擊Sell按鈕
             sell_button = await self._find_sell_button()
@@ -319,7 +319,7 @@ class MarketOperations:
                 return False
             
             await sell_button.click()
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(0.8)  # 減少從1.5到0.8
             
             # 輸入價格
             if not await self._input_selling_price(price):
@@ -1427,10 +1427,10 @@ class MarketOperations:
             return None
 
     async def _input_selling_price(self, price: float) -> bool:
-        """輸入銷售價格"""
+        """輸入銷售價格（優化版）"""
         try:
             logger.debug("⏳ 等待價格輸入對話框...")
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.8)  # 減少從2秒到0.8秒
             
             # 等待#prompt對話框出現
             prompt_dialog = await self.page.query_selector("#prompt")
@@ -1454,9 +1454,9 @@ class MarketOperations:
             logger.debug(f"💰 輸入價格: ${price}")
             await price_input.click()
             await price_input.fill("")  # 清空舊價格
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.2)  # 減少從0.5到0.2
             await price_input.type(str(int(price)))
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)  # 減少從1到0.5
             
             return True
             
@@ -1525,7 +1525,7 @@ class MarketOperations:
             if final_yes_button:
                 logger.debug("✅ 點擊最終確認Yes按鈕...")
                 await final_yes_button.click()
-                await asyncio.sleep(2)
+                await asyncio.sleep(1)  # 減少從2秒到1秒
             
             return True
             

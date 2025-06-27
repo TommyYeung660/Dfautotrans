@@ -94,8 +94,8 @@
     "failure_cooldown_minutes": 5,
     "anti_detection_enabled": true,
     "random_delay_range": [
-      2,
-      8
+      0.5,
+      2
     ],
     "max_operations_per_hour": 50
   },

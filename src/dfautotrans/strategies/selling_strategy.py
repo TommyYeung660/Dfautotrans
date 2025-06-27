@@ -197,8 +197,8 @@ class SellingStrategy:
             # 1. 假設我們以接近 max_buy_price 的價格買入
             # 2. 在此基礎上加價銷售以獲得利潤
             
-            # 假設平均買入價格為 max_buy_price 的 85%
-            estimated_buy_price = max_buy_price * 0.85
+            # 假設平均買入價格為 max_buy_price 的 95%
+            estimated_buy_price = max_buy_price * 0.95
             
             # 獲取加價配置
             markup_percentage = self.trading_config.selling.markup_percentage
